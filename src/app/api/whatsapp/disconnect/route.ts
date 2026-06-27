@@ -23,25 +23,22 @@ export async function POST() {
   }
 
   try {
-    const response = await fetch(`${baseUrl}/instance/connect`, {
+    const response = await fetch(`${baseUrl}/instance/disconnect`, {
       method: 'POST',
-      headers: { token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      headers: { token },
     });
 
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
       return NextResponse.json(
-        { error: data?.error ?? data?.message ?? 'Falha ao conectar com a uazapi.' },
+        { error: data?.error ?? data?.message ?? 'Falha ao desconectar a uazapi.' },
         { status: response.status }
       );
     }
 
-    const qrcode = data?.qrcode ?? data?.qrCode ?? data?.instance?.qrcode ?? null;
-    const instanceStatus = data?.instance?.status ?? data?.status ?? null;
-    return NextResponse.json({ qrcode, status: instanceStatus, raw: data });
+    return NextResponse.json({ ok: true, raw: data });
   } catch {
-    return NextResponse.json({ error: 'Erro de rede ao conectar com a uazapi.' }, { status: 502 });
+    return NextResponse.json({ error: 'Erro de rede ao desconectar a uazapi.' }, { status: 502 });
   }
 }

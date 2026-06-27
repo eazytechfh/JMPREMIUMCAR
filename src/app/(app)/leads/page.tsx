@@ -9,6 +9,7 @@ import type { BaseDeLeads } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PillFilter, type PillOption } from '@/components/PillFilter';
+import { isDentroExpediente } from '@/lib/expediente';
 
 type Periodo = 'hoje' | 'ontem' | '7d' | '30d' | '90d' | 'todos';
 type Expediente = 'todos' | 'dentro' | 'fora';
@@ -27,14 +28,6 @@ const EXPEDIENTE_OPTIONS: PillOption<Expediente>[] = [
   { value: 'dentro', label: 'Dentro do expediente' },
   { value: 'fora', label: 'Fora do expediente' },
 ];
-
-// Mesma decisão de horário comercial documentada no Dashboard: seg-sex, 8h-18h.
-function isDentroExpediente(date: Date): boolean {
-  const day = date.getDay();
-  if (day === 0 || day === 6) return false;
-  const hour = date.getHours();
-  return hour >= 8 && hour < 18;
-}
 
 function daysAgo(n: number): Date {
   const d = new Date();
@@ -76,7 +69,7 @@ export default function LeadsPage() {
       const { data, error } = await supabase
         .from('BASE_DE_LEADS')
         .select(
-          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", "Status de Follow", "Transferencia", "Pesquisa de satisfação", "ID CONTATO CLICK", lid, "Data e Hora"'
+          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora"'
         )
         .order('created_at', { ascending: false });
 

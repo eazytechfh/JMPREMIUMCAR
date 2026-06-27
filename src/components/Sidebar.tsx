@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   {
     href: '/dashboard',
     label: 'Visão Geral',
+    hideFor: ['vendedor'] as string[],
     icon: (
       <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5">
         <path
@@ -90,6 +91,8 @@ interface SidebarProps {
 export function Sidebar({ userName, userCargo }: SidebarProps) {
   const pathname = usePathname();
 
+  const visibleItems = NAV_ITEMS.filter((item) => !item.hideFor?.includes(userCargo));
+
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-gray-200 bg-card">
       <div className="px-5 py-6">
@@ -98,7 +101,7 @@ export function Sidebar({ userName, userCargo }: SidebarProps) {
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
-        {NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = pathname?.startsWith(item.href);
           return (
             <Link

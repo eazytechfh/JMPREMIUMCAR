@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { createClient } from '@/lib/supabase/client';
-import type { BaseDeLeads, Cargo, Etiqueta, Profile } from '@/types/database';
+import type { Cargo, Etiqueta, Profile, Vendedor } from '@/types/database';
+import { Avatar } from '@/components/Avatar';
 
 type Tab = 'novo-usuario' | 'usuarios' | 'etiquetas' | 'fila' | 'credenciais';
 
@@ -36,14 +35,22 @@ export default function ConfiguracoesPage() {
         .select('id, nome, email, cargo, created_at')
         .eq('id', userData.user.id)
         .single();
-      setMeuProfile((data as Profile) ?? null);
+      const profile = (data as Profile) ?? null;
+      setMeuProfile(profile);
+      if (profile?.cargo === 'vendedor') setTab('etiquetas');
     }
     fetchMeuProfile();
   }, []);
 
   const isAdminMaster = meuProfile?.cargo === 'admin_master';
+  const podeGerenciarUsuarios =
+    meuProfile?.cargo === 'admin_master' || meuProfile?.cargo === 'admin' || meuProfile?.cargo === 'gerente';
 
-  const visibleTabs = TABS.filter((t) => t.id !== 'credenciais' || isAdminMaster);
+  const visibleTabs = TABS.filter((t) => {
+    if (t.id === 'credenciais') return isAdminMaster;
+    if (t.id === 'novo-usuario' || t.id === 'usuarios') return podeGerenciarUsuarios;
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -160,7 +167,7 @@ function CriarUsuarioTab() {
         >
           <option value="vendedor">Vendedor</option>
           <option value="gerente">Gerente</option>
-          <option value="admin_master">Admin Master</option>
+          <option value="admin">Admin</option>
         </select>
       </div>
 
@@ -237,11 +244,13 @@ function GerenciarUsuariosTab() {
                 <select
                   value={p.cargo}
                   onChange={(e) => alterarCargo(p.id, e.target.value as Cargo)}
-                  className="rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                  disabled={p.cargo === 'admin_master'}
+                  className="rounded-lg border border-gray-300 px-2 py-1 text-xs disabled:opacity-60"
                 >
                   <option value="vendedor">Vendedor</option>
                   <option value="gerente">Gerente</option>
-                  <option value="admin_master">Admin Master</option>
+                  <option value="admin">Admin</option>
+                  {p.cargo === 'admin_master' && <option value="admin_master">Admin Master</option>}
                 </select>
               </td>
               <td className="px-4 py-3 space-x-2">
@@ -362,7 +371,7 @@ function EtiquetasTab() {
 }
 
 function FilaAtendimentoTab() {
-  const [leads, setLeads] = useState<BaseDeLeads[]>([]);
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -370,24 +379,15 @@ function FilaAtendimentoTab() {
       setLoading(true);
       const supabase = createClient();
       const { data, error } = await supabase
-        .from('BASE_DE_LEADS')
-        .select(
-          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", "Status de Follow", "Transferencia", "Pesquisa de satisfação", "ID CONTATO CLICK", lid, "Data e Hora"'
-        )
-        .is('vendedor', null)
-        .order('created_at', { ascending: true });
+        .from('VENDEDORES')
+        .select('id, created_at, vendedor, telefone, atender, quantos_lead, id_click, id_empresa')
+        .order('id', { ascending: true });
 
       if (error) {
         console.error('Erro ao buscar fila de atendimento:', error.message);
-        setLeads([]);
+        setVendedores([]);
       } else {
-        const todos = (data as unknown as BaseDeLeads[]) ?? [];
-        setLeads(
-          todos.filter((l) => {
-            const estagio = (l.estagio_lead ?? '').toLowerCase();
-            return estagio === 'novo' || estagio === 'oportunidade';
-          })
-        );
+        setVendedores((data as Vendedor[]) ?? []);
       }
       setLoading(false);
     }
@@ -396,37 +396,101 @@ function FilaAtendimentoTab() {
 
   if (loading) return <p className="text-sm text-gray-500">Carregando...</p>;
 
+  // A coluna "atender" da tabela VENDEDORES indica a posição de cada vendedor na fila de
+  // distribuição de leads: "vez" é quem recebe o próximo lead, "espera" é quem está aguardando
+  // a próxima rodada. A ordem de espera segue o id de cadastro (não há coluna de posição
+  // explícita na tabela hoje).
+  const normalizado = (v: string | null) => (v ?? '').toLowerCase().trim();
+  const daVez = vendedores.filter((v) => normalizado(v.atender) === 'vez');
+  const emEspera = vendedores.filter((v) => normalizado(v.atender) === 'espera');
+  const outros = vendedores.filter(
+    (v) => !['vez', 'espera'].includes(normalizado(v.atender))
+  );
+
   return (
-    <div className="overflow-x-auto rounded-xl bg-card shadow-sm">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 text-left text-xs uppercase text-gray-500">
-            <th className="px-4 py-3">Lead</th>
-            <th className="px-4 py-3">Telefone</th>
-            <th className="px-4 py-3">Origem</th>
-            <th className="px-4 py-3">Tempo de espera</th>
-          </tr>
-        </thead>
-        <tbody>
-          {leads.map((lead) => (
-            <tr key={lead.id} className="border-b border-gray-100">
-              <td className="px-4 py-3">{lead.nome_lead}</td>
-              <td className="px-4 py-3">{lead.telefone}</td>
-              <td className="px-4 py-3">{lead.origem ?? '—'}</td>
-              <td className="px-4 py-3">
-                {formatDistanceToNow(new Date(lead.created_at), { locale: ptBR })}
-              </td>
-            </tr>
-          ))}
-          {leads.length === 0 && (
-            <tr>
-              <td colSpan={4} className="px-4 py-6 text-center text-gray-400">
-                Nenhum lead aguardando atendimento.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+    <div className="max-w-2xl space-y-6">
+      <section>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+          Vendedor da vez
+        </h2>
+        {daVez.length === 0 ? (
+          <p className="text-sm text-gray-400">Nenhum vendedor está marcado como &quot;vez&quot; agora.</p>
+        ) : (
+          <div className="space-y-2">
+            {daVez.map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 p-4"
+              >
+                <Avatar name={v.vendedor ?? '?'} size={40} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-gray-900">{v.vendedor}</p>
+                  <p className="text-xs text-gray-500">{v.telefone ?? '—'}</p>
+                </div>
+                <span className="rounded-full bg-green-600 px-3 py-1 text-xs font-medium text-white">
+                  Na vez
+                </span>
+                <span className="text-xs text-gray-500">{v.quantos_lead ?? 0} leads</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+          Em espera
+        </h2>
+        {emEspera.length === 0 ? (
+          <p className="text-sm text-gray-400">Nenhum vendedor em espera.</p>
+        ) : (
+          <ol className="space-y-2">
+            {emEspera.map((v, index) => (
+              <li
+                key={v.id}
+                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-card p-3"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-semibold text-gray-600">
+                  {index + 1}
+                </span>
+                <Avatar name={v.vendedor ?? '?'} size={32} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900">{v.vendedor}</p>
+                  <p className="text-xs text-gray-500">{v.telefone ?? '—'}</p>
+                </div>
+                <span className="text-xs text-gray-500">{v.quantos_lead ?? 0} leads</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      {outros.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Sem status de fila definido
+          </h2>
+          <ul className="space-y-2">
+            {outros.map((v) => (
+              <li
+                key={v.id}
+                className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3"
+              >
+                <Avatar name={v.vendedor ?? '?'} size={32} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-gray-900">{v.vendedor}</p>
+                  <p className="text-xs text-gray-500">{v.telefone ?? '—'}</p>
+                </div>
+                <span className="text-xs text-gray-400">atender: {v.atender ?? '—'}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {vendedores.length === 0 && (
+        <p className="text-sm text-gray-400">Nenhum vendedor cadastrado ainda.</p>
+      )}
     </div>
   );
 }
@@ -441,8 +505,16 @@ function CredenciaisTab() {
 
   const [qrcode, setQrcode] = useState<string | null>(null);
   const [conectando, setConectando] = useState(false);
+  const [desconectando, setDesconectando] = useState(false);
   const [statusConexao, setStatusConexao] = useState<string | null>(null);
+  const [instanceStatus, setInstanceStatus] = useState<string | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function checarStatus() {
+    const response = await fetch('/api/whatsapp/status');
+    const data = await response.json();
+    if (response.ok) setInstanceStatus(data.status ?? null);
+  }
 
   useEffect(() => {
     async function fetchSettings() {
@@ -454,6 +526,7 @@ function CredenciaisTab() {
         .single();
       const token = (data as { uazapi_token: string | null } | null)?.uazapi_token;
       setUazapiToken(token ?? '');
+      if (token) checarStatus();
     }
     fetchSettings();
 
@@ -510,9 +583,28 @@ function CredenciaisTab() {
         if (pollingRef.current) clearInterval(pollingRef.current);
         setConectando(false);
         setStatusConexao('Conectado com sucesso.');
+        setInstanceStatus('connected');
         setQrcode(null);
       }
     }, 3000);
+  }
+
+  async function desconectarWhatsapp() {
+    setDesconectando(true);
+    setStatusConexao(null);
+
+    const response = await fetch('/api/whatsapp/disconnect', { method: 'POST' });
+    const data = await response.json();
+
+    setDesconectando(false);
+
+    if (!response.ok) {
+      setStatusConexao(data.error ?? 'Erro ao desconectar.');
+      return;
+    }
+
+    setInstanceStatus('disconnected');
+    setStatusConexao('Desconectado com sucesso.');
   }
 
   return (
@@ -546,14 +638,46 @@ function CredenciaisTab() {
 
       <div className="rounded-xl bg-card p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-semibold text-gray-900">WhatsApp</h2>
-        <button
-          type="button"
-          onClick={conectarWhatsapp}
-          disabled={conectando}
-          className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-        >
-          {conectando ? 'Conectando...' : 'Conectar WhatsApp'}
-        </button>
+        <p className="mb-3 text-xs text-gray-500">
+          Status:{' '}
+          <span
+            className={
+              instanceStatus === 'connected'
+                ? 'font-medium text-green-600'
+                : instanceStatus === 'connecting'
+                  ? 'font-medium text-amber-600'
+                  : 'font-medium text-gray-600'
+            }
+          >
+            {instanceStatus === 'connected'
+              ? 'Conectado'
+              : instanceStatus === 'connecting'
+                ? 'Conectando'
+                : instanceStatus === 'disconnected'
+                  ? 'Desconectado'
+                  : 'Desconhecido'}
+          </span>
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={conectarWhatsapp}
+            disabled={conectando || instanceStatus === 'connected'}
+            className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {conectando ? 'Conectando...' : 'Conectar WhatsApp'}
+          </button>
+          {instanceStatus === 'connected' && (
+            <button
+              type="button"
+              onClick={desconectarWhatsapp}
+              disabled={desconectando}
+              className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 disabled:opacity-60"
+            >
+              {desconectando ? 'Desconectando...' : 'Desconectar'}
+            </button>
+          )}
+        </div>
         {statusConexao && <p className="mt-2 text-xs text-gray-500">{statusConexao}</p>}
       </div>
 

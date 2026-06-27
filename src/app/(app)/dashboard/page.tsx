@@ -21,6 +21,7 @@ import type { BaseDeLeads } from '@/types/database';
 import { KpiCard } from '@/components/KpiCard';
 import { PillFilter, type PillOption } from '@/components/PillFilter';
 import { ESTAGIO_CONFIG } from '@/components/StatusBadge';
+import { isDentroExpediente } from '@/lib/expediente';
 
 type Periodo = 'hoje' | 'ontem' | '7d' | '30d' | '90d';
 
@@ -33,17 +34,6 @@ const PERIODO_OPTIONS: PillOption<Periodo>[] = [
 ];
 
 // Decisão de horário comercial fixo (não há configuração de expediente no banco hoje):
-// segunda a sexta, das 8h às 18h. Usado para o KPI "Expediente" e para o filtro de
-// Dentro/Fora de expediente na tela de Leads.
-const EXPEDIENTE_INICIO_HORA = 8;
-const EXPEDIENTE_FIM_HORA = 18;
-
-function isDentroExpediente(date: Date): boolean {
-  const day = date.getDay(); // 0 = domingo, 6 = sábado
-  if (day === 0 || day === 6) return false;
-  const hour = date.getHours();
-  return hour >= EXPEDIENTE_INICIO_HORA && hour < EXPEDIENTE_FIM_HORA;
-}
 
 function getPeriodoRange(periodo: Periodo): { start: Date; end: Date; prevStart: Date; prevEnd: Date } {
   const now = new Date();
@@ -109,7 +99,7 @@ export default function DashboardPage() {
       const { data, error } = await supabase
         .from('BASE_DE_LEADS')
         .select(
-          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", "Status de Follow", "Transferencia", "Pesquisa de satisfação", "ID CONTATO CLICK", lid, "Data e Hora"'
+          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora"'
         )
         .order('created_at', { ascending: false });
 
@@ -164,10 +154,10 @@ export default function DashboardPage() {
   const taxaConversaoAnterior = totalLeadsAnterior > 0 ? (fechadosAnterior / totalLeadsAnterior) * 100 : 0;
 
   const valorEmNegociacao = leadsNoPeriodo
-    .filter((l) => (l.estagio_lead ?? '').toLowerCase() === 'negociacao')
+    .filter((l) => (l.estagio_lead ?? '').toLowerCase() === 'em_negociacao')
     .reduce((sum, l) => sum + (l.valor ?? 0), 0);
   const valorEmNegociacaoAnterior = leadsPeriodoAnterior
-    .filter((l) => (l.estagio_lead ?? '').toLowerCase() === 'negociacao')
+    .filter((l) => (l.estagio_lead ?? '').toLowerCase() === 'em_negociacao')
     .reduce((sum, l) => sum + (l.valor ?? 0), 0);
 
   const agora = new Date();

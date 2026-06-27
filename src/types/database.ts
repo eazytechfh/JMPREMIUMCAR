@@ -48,6 +48,25 @@ export interface BaseDeLeads {
   lid: string | null;
   /** Coluna real: "Data e Hora" */
   DataEHora: string | null;
+  cpf: string | null;
+  data_nascimento: string | null;
+  score_serasa: number | null;
+}
+
+export interface LeadEtiqueta {
+  id: number;
+  id_lead: number;
+  id_etiqueta: number;
+  created_at: string;
+}
+
+export interface LeadHistoricoEstagio {
+  id: number;
+  id_lead: number;
+  estagio_anterior: string | null;
+  estagio_novo: string;
+  usuario: string | null;
+  created_at: string;
 }
 
 export interface Vendedor {
@@ -125,7 +144,9 @@ export interface Autorizacao {
   observacao: string | null;
 }
 
-export type Cargo = 'admin_master' | 'gerente' | 'vendedor';
+// admin_master é uma role oculta de uso exclusivo dos desenvolvedores (senha padrão interna),
+// nunca exposta como opção criável nos formulários de usuário do CRM.
+export type Cargo = 'admin_master' | 'admin' | 'gerente' | 'vendedor';
 
 export interface Profile {
   id: string;

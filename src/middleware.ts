@@ -35,14 +35,32 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  if (!isAuthenticated && pathname !== '/login') {
+  // /produtos é o chat público de cadastro de produtos usado por clientes (sem login).
+  const isPublicRoute = pathname === '/login' || pathname.startsWith('/produtos');
+
+  if (!isAuthenticated && !isPublicRoute) {
     const redirectUrl = new URL('/login', request.url);
     return NextResponse.redirect(redirectUrl);
   }
 
-  if (isAuthenticated && pathname === '/login') {
-    const redirectUrl = new URL('/dashboard', request.url);
-    return NextResponse.redirect(redirectUrl);
+  if (isAuthenticated) {
+    // Vendedor não tem acesso ao Dashboard (só vê os próprios leads atribuídos). Bloqueado aqui
+    // também no middleware, e não só escondendo o item da sidebar, para cobrir acesso direto à URL.
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('cargo')
+      .eq('id', data.session!.user.id)
+      .single();
+    const cargo = (profileData as { cargo: string } | null)?.cargo ?? 'vendedor';
+    const homeRoute = cargo === 'vendedor' ? '/leads' : '/dashboard';
+
+    if (pathname === '/login') {
+      return NextResponse.redirect(new URL(homeRoute, request.url));
+    }
+
+    if (cargo === 'vendedor' && pathname.startsWith('/dashboard')) {
+      return NextResponse.redirect(new URL('/leads', request.url));
+    }
   }
 
   return response;

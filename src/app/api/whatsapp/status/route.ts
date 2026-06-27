@@ -27,12 +27,17 @@ export async function GET() {
       headers: { token },
     });
 
+    const data = await response.json().catch(() => null);
+
     if (!response.ok) {
-      return NextResponse.json({ error: 'Falha ao consultar status da uazapi.' }, { status: 502 });
+      return NextResponse.json(
+        { error: data?.error ?? data?.message ?? 'Falha ao consultar status da uazapi.' },
+        { status: response.status }
+      );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
+    const status = data?.instance?.status ?? data?.status ?? null;
+    return NextResponse.json({ status, raw: data });
   } catch {
     return NextResponse.json({ error: 'Erro de rede ao consultar a uazapi.' }, { status: 502 });
   }

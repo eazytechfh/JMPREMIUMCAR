@@ -14,20 +14,18 @@ import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/client';
 import type { BaseDeLeads } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
+import { LeadDrawer } from '@/components/LeadDrawer';
+import { ESTAGIO_CONFIG } from '@/components/StatusBadge';
 
-// Decisão de design: como não há acesso aos dados reais de produção para inferir todos os
-// valores possíveis de estagio_lead, definimos aqui um conjunto razoável de estágios de funil
-// para concessionárias de veículos. Caso o estágio real de um lead não esteja nesta lista, ele
-// é exibido na coluna "Oportunidade" (fallback) até ser reclassificado manualmente.
-const COLUNAS = [
-  { id: 'oportunidade', label: 'Oportunidade', color: '#22c55e' },
-  { id: 'em_qualificacao', label: 'Em Qualificação', color: '#38bdf8' },
-  { id: 'transferido', label: 'Transferido', color: '#3b82f6' },
-  { id: 'negociacao', label: 'Negociação', color: '#f97316' },
-  { id: 'proposta', label: 'Proposta', color: '#a855f7' },
-  { id: 'fechado', label: 'Fechado', color: '#16a34a' },
-  { id: 'perdido', label: 'Perdido', color: '#ef4444' },
-] as const;
+// As colunas do Pipeline são geradas a partir de ESTAGIO_CONFIG (StatusBadge.tsx), que contém
+// exatamente os valores aceitos pela constraint CHECK de estagio_lead no banco. Não adicione um
+// estágio aqui sem confirmar antes que o valor existe na constraint real — caso contrário o
+// drag-and-drop vai falhar com erro 23514 ao tentar salvar.
+const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFIG>).map((id) => ({
+  id,
+  label: ESTAGIO_CONFIG[id].label,
+  color: ESTAGIO_CONFIG[id].color,
+}));
 
 type ColunaId = (typeof COLUNAS)[number]['id'];
 
@@ -39,9 +37,10 @@ function normalizeEstagio(estagio: string): ColunaId {
 
 interface CardProps {
   lead: BaseDeLeads;
+  onOpen: (lead: BaseDeLeads) => void;
 }
 
-function LeadCard({ lead }: CardProps) {
+function LeadCard({ lead, onOpen }: CardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lead.id,
   });
@@ -58,6 +57,7 @@ function LeadCard({ lead }: CardProps) {
       style={style}
       {...attributes}
       {...listeners}
+      onClick={() => onOpen(lead)}
       className="cursor-grab rounded-lg border border-gray-200 bg-white p-3 shadow-sm active:cursor-grabbing"
     >
       <div className="mb-2 flex items-center gap-2">
@@ -80,9 +80,10 @@ interface ColumnProps {
   label: string;
   color: string;
   leads: BaseDeLeads[];
+  onOpenLead: (lead: BaseDeLeads) => void;
 }
 
-function Column({ id, label, color, leads }: ColumnProps) {
+function Column({ id, label, color, leads, onOpenLead }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
@@ -103,7 +104,7 @@ function Column({ id, label, color, leads }: ColumnProps) {
       <SortableContext items={leads.map((l) => l.id)} strategy={verticalListSortingStrategy}>
         <div className="flex flex-col gap-2">
           {leads.map((lead) => (
-            <LeadCard key={lead.id} lead={lead} />
+            <LeadCard key={lead.id} lead={lead} onOpen={onOpenLead} />
           ))}
         </div>
       </SortableContext>
@@ -115,6 +116,24 @@ export default function PipelinePage() {
   const [leads, setLeads] = useState<BaseDeLeads[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [leadSelecionado, setLeadSelecionado] = useState<BaseDeLeads | null>(null);
+  const [nomeUsuario, setNomeUsuario] = useState<string>('Usuário');
+
+  useEffect(() => {
+    async function fetchUsuario() {
+      const supabase = createClient();
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('nome, email')
+        .eq('id', userData.user.id)
+        .single();
+      const nome = (profile as { nome: string | null; email: string | null } | null)?.nome;
+      setNomeUsuario(nome || userData.user.email || 'Usuário');
+    }
+    fetchUsuario();
+  }, []);
 
   // activationConstraint com distance pequena: faz o drag iniciar quase imediatamente ao
   // mover o mouse, dando resposta "rápida" ao usuário sem disparar drag acidental em cliques.
@@ -131,7 +150,7 @@ export default function PipelinePage() {
       const { data, error } = await supabase
         .from('BASE_DE_LEADS')
         .select(
-          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", "Status de Follow", "Transferencia", "Pesquisa de satisfação", "ID CONTATO CLICK", lid, "Data e Hora"'
+          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa'
         )
         .order('created_at', { ascending: false });
 
@@ -193,7 +212,15 @@ export default function PipelinePage() {
       );
       setErrorMessage('Não foi possível mover o lead. Tente novamente.');
       setTimeout(() => setErrorMessage(null), 4000);
+      return;
     }
+
+    await supabase.from('lead_historico_estagio').insert({
+      id_lead: leadId,
+      estagio_anterior: estagioAnterior,
+      estagio_novo: novoEstagio,
+      usuario: nomeUsuario,
+    });
   }
 
   return (
@@ -219,10 +246,31 @@ export default function PipelinePage() {
                 label={coluna.label}
                 color={coluna.color}
                 leads={leadsPorColuna.get(coluna.id) ?? []}
+                onOpenLead={setLeadSelecionado}
               />
             ))}
           </div>
         </DndContext>
+      )}
+
+      {leadSelecionado && (
+        <LeadDrawer
+          lead={leadSelecionado}
+          estagioLabel={
+            COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.label ??
+            'Oportunidade'
+          }
+          estagioColor={
+            COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.color ??
+            '#22c55e'
+          }
+          estagioLabelOf={(estagio) => COLUNAS.find((c) => c.id === normalizeEstagio(estagio))?.label ?? estagio}
+          onClose={() => setLeadSelecionado(null)}
+          onUpdated={(atualizado) => {
+            setLeadSelecionado(atualizado);
+            setLeads((prev) => prev.map((l) => (l.id === atualizado.id ? atualizado : l)));
+          }}
+        />
       )}
     </div>
   );

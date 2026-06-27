@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     .single();
 
   const cargo = (profile as { cargo: string } | null)?.cargo;
-  if (cargo !== 'admin_master' && cargo !== 'gerente') {
+  if (cargo !== 'admin_master' && cargo !== 'admin' && cargo !== 'gerente') {
     return NextResponse.json({ error: 'Permissão insuficiente.' }, { status: 403 });
   }
 
@@ -32,6 +32,12 @@ export async function POST(request: Request) {
 
   if (!email || !password || !nome || !novoCargo) {
     return NextResponse.json({ error: 'Campos obrigatórios faltando.' }, { status: 400 });
+  }
+
+  // admin_master é uma role oculta de uso exclusivo dos desenvolvedores — nunca pode ser
+  // atribuída através da API de criação de usuário, mesmo que alguém manipule a requisição.
+  if (novoCargo === 'admin_master') {
+    return NextResponse.json({ error: 'Cargo inválido.' }, { status: 400 });
   }
 
   const admin = createAdminClient();
