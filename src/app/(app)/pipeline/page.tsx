@@ -12,9 +12,10 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { createClient } from '@/lib/supabase/client';
-import type { BaseDeLeads } from '@/types/database';
+import type { BaseDeLeads, Etiqueta, LeadEtiqueta } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
 import { LeadDrawer } from '@/components/LeadDrawer';
+import { LeadFilters, createDefaultLeadFilters, filterLeads } from '@/components/LeadFilters';
 import { ESTAGIO_CONFIG } from '@/components/StatusBadge';
 
 // As colunas do Pipeline são geradas a partir de ESTAGIO_CONFIG (StatusBadge.tsx), que contém
@@ -37,10 +38,12 @@ function normalizeEstagio(estagio: string): ColunaId {
 
 interface CardProps {
   lead: BaseDeLeads;
+  etiquetas: Etiqueta[];
   onOpen: (lead: BaseDeLeads) => void;
+  onEtiquetaClick: (etiqueta: Etiqueta) => void;
 }
 
-function LeadCard({ lead, onOpen }: CardProps) {
+function LeadCard({ lead, etiquetas, onOpen, onEtiquetaClick }: CardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lead.id,
   });
@@ -71,6 +74,29 @@ function LeadCard({ lead, onOpen }: CardProps) {
         <p className="truncate text-xs text-gray-600">Interesse: {lead.veiculo_interesse}</p>
       )}
       {lead.vendedor && <p className="truncate text-xs text-gray-400">Vendedor: {lead.vendedor}</p>}
+      {etiquetas.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {etiquetas.map((etiqueta) => (
+            <button
+              key={etiqueta.id}
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEtiquetaClick(etiqueta);
+              }}
+              className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+              style={{
+                backgroundColor: `${etiqueta.cor}1a`,
+                borderColor: etiqueta.cor,
+                color: etiqueta.cor,
+              }}
+            >
+              {etiqueta.nome}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -80,10 +106,12 @@ interface ColumnProps {
   label: string;
   color: string;
   leads: BaseDeLeads[];
+  etiquetasPorLead: Map<number, Etiqueta[]>;
   onOpenLead: (lead: BaseDeLeads) => void;
+  onEtiquetaClick: (etiqueta: Etiqueta) => void;
 }
 
-function Column({ id, label, color, leads, onOpenLead }: ColumnProps) {
+function Column({ id, label, color, leads, etiquetasPorLead, onOpenLead, onEtiquetaClick }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
   return (
@@ -102,9 +130,15 @@ function Column({ id, label, color, leads, onOpenLead }: ColumnProps) {
       </div>
 
       <SortableContext items={leads.map((l) => l.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex flex-col gap-2">
+        <div className="flex max-h-[760px] flex-col gap-2 overflow-y-auto pr-1">
           {leads.map((lead) => (
-            <LeadCard key={lead.id} lead={lead} onOpen={onOpenLead} />
+            <LeadCard
+              key={lead.id}
+              lead={lead}
+              etiquetas={etiquetasPorLead.get(lead.id) ?? []}
+              onOpen={onOpenLead}
+              onEtiquetaClick={onEtiquetaClick}
+            />
           ))}
         </div>
       </SortableContext>
@@ -114,10 +148,13 @@ function Column({ id, label, color, leads, onOpenLead }: ColumnProps) {
 
 export default function PipelinePage() {
   const [leads, setLeads] = useState<BaseDeLeads[]>([]);
+  const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
+  const [leadEtiquetas, setLeadEtiquetas] = useState<LeadEtiqueta[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [leadSelecionado, setLeadSelecionado] = useState<BaseDeLeads | null>(null);
   const [nomeUsuario, setNomeUsuario] = useState<string>('Usuário');
+  const [filters, setFilters] = useState(createDefaultLeadFilters);
 
   useEffect(() => {
     async function fetchUsuario() {
@@ -147,12 +184,16 @@ export default function PipelinePage() {
     async function fetchLeads() {
       setLoading(true);
       const supabase = createClient();
-      const { data, error } = await supabase
-        .from('BASE_DE_LEADS')
-        .select(
-          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa'
-        )
-        .order('created_at', { ascending: false });
+      const [{ data, error }, { data: etiquetasData }, { data: leadEtiquetasData }] = await Promise.all([
+        supabase
+          .from('BASE_DE_LEADS')
+          .select(
+            'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa'
+          )
+          .order('created_at', { ascending: false }),
+        supabase.from('etiquetas').select('id, nome, cor, created_at').order('nome'),
+        supabase.from('lead_etiquetas').select('id, id_lead, id_etiqueta, created_at'),
+      ]);
 
       if (!isMounted) return;
 
@@ -162,6 +203,8 @@ export default function PipelinePage() {
       } else {
         setLeads((data as unknown as BaseDeLeads[]) ?? []);
       }
+      setEtiquetas((etiquetasData as Etiqueta[]) ?? []);
+      setLeadEtiquetas((leadEtiquetasData as LeadEtiqueta[]) ?? []);
       setLoading(false);
     }
 
@@ -171,21 +214,73 @@ export default function PipelinePage() {
     };
   }, []);
 
+  const etiquetaById = useMemo(() => new Map(etiquetas.map((etiqueta) => [etiqueta.id, etiqueta])), [etiquetas]);
+
+  const etiquetaIdsPorLead = useMemo(() => {
+    const map = new Map<number, Set<number>>();
+    leadEtiquetas.forEach((item) => {
+      const set = map.get(item.id_lead) ?? new Set<number>();
+      set.add(item.id_etiqueta);
+      map.set(item.id_lead, set);
+    });
+    return map;
+  }, [leadEtiquetas]);
+
+  const etiquetasPorLead = useMemo(() => {
+    const map = new Map<number, Etiqueta[]>();
+    leadEtiquetas.forEach((item) => {
+      const etiqueta = etiquetaById.get(item.id_etiqueta);
+      if (!etiqueta) return;
+      const list = map.get(item.id_lead) ?? [];
+      list.push(etiqueta);
+      map.set(item.id_lead, list);
+    });
+    return map;
+  }, [etiquetaById, leadEtiquetas]);
+
+  const leadsFiltrados = useMemo(
+    () => filterLeads(leads, filters, etiquetaIdsPorLead),
+    [leads, filters, etiquetaIdsPorLead]
+  );
+
   const leadsPorColuna = useMemo(() => {
     const map = new Map<ColunaId, BaseDeLeads[]>(COLUNAS.map((c) => [c.id, []]));
-    leads.forEach((lead) => {
+    leadsFiltrados.forEach((lead) => {
       const coluna = normalizeEstagio(lead.estagio_lead);
       map.get(coluna)?.push(lead);
     });
     return map;
-  }, [leads]);
+  }, [leadsFiltrados]);
+
+  function limparFiltros() {
+    setFilters(createDefaultLeadFilters());
+  }
+
+  function atualizarEtiquetasDoLead(leadId: number, etiquetaIds: number[]) {
+    setLeadEtiquetas((prev) => [
+      ...prev.filter((item) => item.id_lead !== leadId),
+      ...etiquetaIds.map((idEtiqueta) => ({
+        id: -idEtiqueta,
+        id_lead: leadId,
+        id_etiqueta: idEtiqueta,
+        created_at: new Date().toISOString(),
+      })),
+    ]);
+  }
+
+  function filtrarPorEtiqueta(etiqueta: Etiqueta) {
+    setFilters((prev) => ({ ...prev, etiquetaFiltro: String(etiqueta.id) }));
+  }
 
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
 
     const leadId = Number(active.id);
-    const novoEstagio = over.id as ColunaId;
+    const colunaDestino = COLUNAS.find((coluna) => coluna.id === over.id)?.id;
+    const leadDestino = leads.find((lead) => lead.id === Number(over.id));
+    const novoEstagio = colunaDestino ?? (leadDestino ? normalizeEstagio(leadDestino.estagio_lead) : null);
+    if (!novoEstagio) return;
 
     const leadAtual = leads.find((l) => l.id === leadId);
     if (!leadAtual) return;
@@ -227,12 +322,22 @@ export default function PipelinePage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Pipeline</h1>
-        <p className="text-sm text-gray-500">Arraste os cards entre as etapas do funil</p>
+        <p className="text-sm text-gray-500">
+          Arraste os cards entre as etapas do funil · {leadsFiltrados.length} lead(s) encontrado(s)
+        </p>
       </div>
 
       {errorMessage && (
         <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{errorMessage}</div>
       )}
+
+      <LeadFilters
+        leads={leads}
+        filters={filters}
+        etiquetas={etiquetas}
+        onChange={setFilters}
+        onClear={limparFiltros}
+      />
 
       {loading ? (
         <p className="text-sm text-gray-500">Carregando...</p>
@@ -246,7 +351,9 @@ export default function PipelinePage() {
                 label={coluna.label}
                 color={coluna.color}
                 leads={leadsPorColuna.get(coluna.id) ?? []}
+                etiquetasPorLead={etiquetasPorLead}
                 onOpenLead={setLeadSelecionado}
+                onEtiquetaClick={filtrarPorEtiqueta}
               />
             ))}
           </div>
@@ -270,6 +377,7 @@ export default function PipelinePage() {
             setLeadSelecionado(atualizado);
             setLeads((prev) => prev.map((l) => (l.id === atualizado.id ? atualizado : l)));
           }}
+          onEtiquetasChanged={atualizarEtiquetasDoLead}
         />
       )}
     </div>

@@ -33,6 +33,7 @@ interface LeadDrawerProps {
   estagioLabelOf: (estagio: string) => string;
   onClose: () => void;
   onUpdated: (lead: BaseDeLeads) => void;
+  onEtiquetasChanged?: (leadId: number, etiquetaIds: number[]) => void;
 }
 
 export function LeadDrawer({
@@ -42,6 +43,7 @@ export function LeadDrawer({
   estagioLabelOf,
   onClose,
   onUpdated,
+  onEtiquetasChanged,
 }: LeadDrawerProps) {
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
   const [etiquetasDoLead, setEtiquetasDoLead] = useState<Set<number>>(new Set());
@@ -107,6 +109,7 @@ export function LeadDrawer({
       const next = new Set(prev);
       if (jaTem) next.delete(idEtiqueta);
       else next.add(idEtiqueta);
+      onEtiquetasChanged?.(lead.id, Array.from(next));
       return next;
     });
 
@@ -353,6 +356,19 @@ export function LeadDrawer({
               })}
               {etiquetas.length === 0 && (
                 <p className="text-xs text-gray-400">Nenhuma etiqueta cadastrada.</p>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Resumo de Qualificação [IA]
+            </h3>
+            <div className="min-h-24 rounded-lg bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-700">
+              {lead.resumo_qualificacao?.trim() ? (
+                <p className="whitespace-pre-wrap">{lead.resumo_qualificacao}</p>
+              ) : (
+                <p className="text-gray-400">Nenhum resumo de qualificação disponível ainda.</p>
               )}
             </div>
           </section>
