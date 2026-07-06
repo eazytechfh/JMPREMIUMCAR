@@ -190,6 +190,7 @@ export default function PipelinePage() {
           .select(
             'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa'
           )
+          .not('estagio_lead', 'is', null)
           .order('created_at', { ascending: false }),
         supabase.from('etiquetas').select('id, nome, cor, created_at').order('nome'),
         supabase.from('lead_etiquetas').select('id, id_lead, id_etiqueta, created_at'),
@@ -201,7 +202,7 @@ export default function PipelinePage() {
         console.error('Erro ao buscar leads:', error.message);
         setLeads([]);
       } else {
-        setLeads((data as unknown as BaseDeLeads[]) ?? []);
+        setLeads(((data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
       }
       setEtiquetas((etiquetasData as Etiqueta[]) ?? []);
       setLeadEtiquetas((leadEtiquetasData as LeadEtiqueta[]) ?? []);

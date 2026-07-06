@@ -39,6 +39,7 @@ export default function LeadsPage() {
         .select(
           'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora"'
         )
+        .not('estagio_lead', 'is', null)
         .order('created_at', { ascending: false });
 
       if (!isMounted) return;
@@ -47,7 +48,7 @@ export default function LeadsPage() {
         console.error('Erro ao buscar leads:', error.message);
         setLeads([]);
       } else {
-        setLeads((data as unknown as BaseDeLeads[]) ?? []);
+        setLeads(((data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
       }
       setLoading(false);
     }
