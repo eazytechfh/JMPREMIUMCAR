@@ -30,8 +30,8 @@ const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFI
 
 type ColunaId = (typeof COLUNAS)[number]['id'];
 
-function normalizeEstagio(estagio: string): ColunaId {
-  const key = estagio.toLowerCase().trim();
+function normalizeEstagio(estagio: string | null | undefined): ColunaId {
+  const key = (estagio ?? '').toLowerCase().trim();
   const found = COLUNAS.find((c) => c.id === key);
   return found ? found.id : 'oportunidade';
 }
@@ -371,7 +371,9 @@ export default function PipelinePage() {
             COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.color ??
             '#22c55e'
           }
-          estagioLabelOf={(estagio) => COLUNAS.find((c) => c.id === normalizeEstagio(estagio))?.label ?? estagio}
+          estagioLabelOf={(estagio) =>
+            COLUNAS.find((c) => c.id === normalizeEstagio(estagio))?.label ?? estagio ?? 'Oportunidade'
+          }
           onClose={() => setLeadSelecionado(null)}
           onUpdated={(atualizado) => {
             setLeadSelecionado(atualizado);

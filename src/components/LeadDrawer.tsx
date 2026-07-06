@@ -30,7 +30,7 @@ interface LeadDrawerProps {
   lead: BaseDeLeads;
   estagioLabel: string;
   estagioColor: string;
-  estagioLabelOf: (estagio: string) => string;
+  estagioLabelOf: (estagio: string | null | undefined) => string;
   onClose: () => void;
   onUpdated: (lead: BaseDeLeads) => void;
   onEtiquetasChanged?: (leadId: number, etiquetaIds: number[]) => void;
