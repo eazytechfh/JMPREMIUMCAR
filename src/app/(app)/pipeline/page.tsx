@@ -28,6 +28,8 @@ const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFI
   color: ESTAGIO_CONFIG[id].color,
 }));
 
+const LEADS_PER_COLUMN_PAGE = 12;
+
 type ColunaId = (typeof COLUNAS)[number]['id'];
 
 function normalizeEstagio(estagio: string | null | undefined): ColunaId {
@@ -109,15 +111,31 @@ interface ColumnProps {
   etiquetasPorLead: Map<number, Etiqueta[]>;
   onOpenLead: (lead: BaseDeLeads) => void;
   onEtiquetaClick: (etiqueta: Etiqueta) => void;
+  page: number;
+  onPageChange: (page: number) => void;
 }
 
-function Column({ id, label, color, leads, etiquetasPorLead, onOpenLead, onEtiquetaClick }: ColumnProps) {
+function Column({
+  id,
+  label,
+  color,
+  leads,
+  etiquetasPorLead,
+  onOpenLead,
+  onEtiquetaClick,
+  page,
+  onPageChange,
+}: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
+  const totalPages = Math.max(1, Math.ceil(leads.length / LEADS_PER_COLUMN_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * LEADS_PER_COLUMN_PAGE;
+  const visibleLeads = leads.slice(start, start + LEADS_PER_COLUMN_PAGE);
 
   return (
     <div
       ref={setNodeRef}
-      className={`flex w-72 shrink-0 flex-col rounded-xl bg-gray-50 p-3 ${
+      className={`flex h-full min-h-0 w-72 shrink-0 flex-col rounded-xl bg-gray-50 p-3 ${
         isOver ? 'ring-2 ring-gray-400' : ''
       }`}
     >
@@ -129,9 +147,9 @@ function Column({ id, label, color, leads, etiquetasPorLead, onOpenLead, onEtiqu
         <span className="text-xs text-gray-500">{leads.length}</span>
       </div>
 
-      <SortableContext items={leads.map((l) => l.id)} strategy={verticalListSortingStrategy}>
-        <div className="flex max-h-[760px] flex-col gap-2 overflow-y-auto pr-1">
-          {leads.map((lead) => (
+      <SortableContext items={visibleLeads.map((l) => l.id)} strategy={verticalListSortingStrategy}>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+          {visibleLeads.map((lead) => (
             <LeadCard
               key={lead.id}
               lead={lead}
@@ -142,6 +160,30 @@ function Column({ id, label, color, leads, etiquetasPorLead, onOpenLead, onEtiqu
           ))}
         </div>
       </SortableContext>
+
+      {totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between border-t border-gray-200 pt-3">
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.max(1, safePage - 1))}
+            disabled={safePage === 1}
+            className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Anterior
+          </button>
+          <span className="text-xs text-gray-500">
+            {safePage}/{totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+            disabled={safePage === totalPages}
+            className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Proxima
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -155,12 +197,13 @@ export default function PipelinePage() {
   const [leadSelecionado, setLeadSelecionado] = useState<BaseDeLeads | null>(null);
   const [nomeUsuario, setNomeUsuario] = useState<string>('Usuário');
   const [filters, setFilters] = useState(createDefaultLeadFilters);
+  const [columnPages, setColumnPages] = useState<Record<string, number>>({});
 
   useEffect(() => {
     async function fetchUsuario() {
       const supabase = createClient();
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData.user) return;
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData.user) return;
       const { data: profile } = await supabase
         .from('profiles')
         .select('nome, email')
@@ -253,6 +296,29 @@ export default function PipelinePage() {
     return map;
   }, [leadsFiltrados]);
 
+  useEffect(() => {
+    setColumnPages((prev) => {
+      let changed = false;
+      const next = { ...prev };
+
+      COLUNAS.forEach((coluna) => {
+        const total = leadsPorColuna.get(coluna.id)?.length ?? 0;
+        const totalPages = Math.max(1, Math.ceil(total / LEADS_PER_COLUMN_PAGE));
+        const current = next[coluna.id] ?? 1;
+
+        if (current > totalPages) {
+          next[coluna.id] = totalPages;
+          changed = true;
+        } else if (current < 1) {
+          next[coluna.id] = 1;
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [leadsPorColuna]);
+
   function limparFiltros() {
     setFilters(createDefaultLeadFilters());
   }
@@ -320,8 +386,8 @@ export default function PipelinePage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="shrink-0">
         <h1 className="text-2xl font-bold text-foreground">Pipeline</h1>
         <p className="text-sm text-gray-500">
           Arraste os cards entre as etapas do funil · {leadsFiltrados.length} lead(s) encontrado(s)
@@ -329,22 +395,25 @@ export default function PipelinePage() {
       </div>
 
       {errorMessage && (
-        <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{errorMessage}</div>
+        <div className="shrink-0 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{errorMessage}</div>
       )}
 
-      <LeadFilters
-        leads={leads}
-        filters={filters}
-        etiquetas={etiquetas}
-        onChange={setFilters}
-        onClear={limparFiltros}
-      />
+      <div className="shrink-0">
+        <LeadFilters
+          leads={leads}
+          filters={filters}
+          etiquetas={etiquetas}
+          onChange={setFilters}
+          onClear={limparFiltros}
+        />
+      </div>
 
       {loading ? (
         <p className="text-sm text-gray-500">Carregando...</p>
       ) : (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="flex gap-4 overflow-x-auto pb-4">
+          <div className="min-h-0 flex-1 overflow-x-auto pb-2">
+            <div className="flex h-full gap-4">
             {COLUNAS.map((coluna) => (
               <Column
                 key={coluna.id}
@@ -355,8 +424,11 @@ export default function PipelinePage() {
                 etiquetasPorLead={etiquetasPorLead}
                 onOpenLead={setLeadSelecionado}
                 onEtiquetaClick={filtrarPorEtiqueta}
+                page={columnPages[coluna.id] ?? 1}
+                onPageChange={(page) => setColumnPages((prev) => ({ ...prev, [coluna.id]: page }))}
               />
             ))}
+            </div>
           </div>
         </DndContext>
       )}

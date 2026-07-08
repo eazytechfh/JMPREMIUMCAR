@@ -30,7 +30,7 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const { data } = await supabase.auth.getSession();
+  const { data, error: sessionError } = await supabase.auth.getSession();
   const isAuthenticated = !!data.session;
 
   const { pathname } = request.nextUrl;
@@ -40,6 +40,25 @@ export async function middleware(request: NextRequest) {
   // sua própria sessão, e o chat público precisa chamar /api/produtos/webhook sem estar logado.
   const isPublicRoute =
     pathname === '/login' || pathname.startsWith('/produtos') || pathname.startsWith('/api/');
+
+  if (sessionError) {
+    const authCookieNames = request.cookies
+      .getAll()
+      .filter((cookie) => cookie.name.startsWith('sb-'))
+      .map((cookie) => cookie.name);
+
+    authCookieNames.forEach((name) => {
+      response.cookies.set(name, '', { path: '/', maxAge: 0 });
+    });
+
+    if (isPublicRoute) return response;
+
+    const redirectResponse = NextResponse.redirect(new URL('/login', request.url));
+    authCookieNames.forEach((name) => {
+      redirectResponse.cookies.set(name, '', { path: '/', maxAge: 0 });
+    });
+    return redirectResponse;
+  }
 
   if (!isAuthenticated && !isPublicRoute) {
     const redirectUrl = new URL('/login', request.url);

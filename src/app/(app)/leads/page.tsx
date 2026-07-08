@@ -5,9 +5,10 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { createClient } from '@/lib/supabase/client';
-import type { BaseDeLeads } from '@/types/database';
+import type { BaseDeLeads, Etiqueta, LeadEtiqueta, Vendedor } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
-import { StatusBadge } from '@/components/StatusBadge';
+import { LeadDrawer } from '@/components/LeadDrawer';
+import { ESTAGIO_CONFIG, StatusBadge } from '@/components/StatusBadge';
 import { LeadFilters, createDefaultLeadFilters, filterLeads } from '@/components/LeadFilters';
 
 const ORIGEM_DOT_COLORS: Record<string, string> = {
@@ -18,15 +19,215 @@ const ORIGEM_DOT_COLORS: Record<string, string> = {
   indicacao: '#f97316',
 };
 
+const LEAD_SELECT =
+  'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfa\u00e7\u00e3o", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
+
+const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFIG>).map((id) => ({
+  id,
+  label: ESTAGIO_CONFIG[id].label,
+  color: ESTAGIO_CONFIG[id].color,
+}));
+
+type ColunaId = (typeof COLUNAS)[number]['id'];
+
+function normalizeEstagio(estagio: string | null | undefined): ColunaId {
+  const key = (estagio ?? '').toLowerCase().trim();
+  const found = COLUNAS.find((c) => c.id === key);
+  return found ? found.id : 'oportunidade';
+}
+
 function getOrigemColor(origem: string | null): string {
   if (!origem) return '#6b7280';
   return ORIGEM_DOT_COLORS[origem.toLowerCase()] ?? '#6b7280';
 }
 
+interface NovoLeadModalProps {
+  vendedores: Vendedor[];
+  idEmpresaPadrao: number;
+  vendedorPadrao: string;
+  onClose: () => void;
+  onCreated: (lead: BaseDeLeads) => void;
+}
+
+function NovoLeadModal({ vendedores, idEmpresaPadrao, vendedorPadrao, onClose, onCreated }: NovoLeadModalProps) {
+  const [form, setForm] = useState({
+    nome_lead: '',
+    telefone: '',
+    email: '',
+    origem: 'manual',
+    vendedor: vendedorPadrao,
+    veiculo_interesse: '',
+    valor: '',
+    observacao_vendedor: '',
+  });
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  async function criarLead() {
+    if (!form.nome_lead.trim() || !form.telefone.trim()) {
+      setErro('Informe nome e telefone para criar o lead.');
+      return;
+    }
+
+    setSalvando(true);
+    setErro(null);
+
+    const valorNumerico = form.valor ? Number(form.valor.replace(',', '.')) : null;
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('BASE_DE_LEADS')
+      .insert({
+        id_empresa: idEmpresaPadrao,
+        nome_lead: form.nome_lead.trim(),
+        telefone: form.telefone.trim(),
+        email: form.email.trim() || null,
+        origem: form.origem.trim() || 'manual',
+        vendedor: form.vendedor || null,
+        veiculo_interesse: form.veiculo_interesse.trim() || null,
+        valor: typeof valorNumerico === 'number' && Number.isFinite(valorNumerico) ? valorNumerico : null,
+        observacao_vendedor: form.observacao_vendedor.trim() || null,
+        estagio_lead: 'oportunidade',
+      })
+      .select(LEAD_SELECT)
+      .single();
+
+    setSalvando(false);
+
+    if (error) {
+      setErro(`Erro ao criar lead: ${error.message}`);
+      return;
+    }
+
+    onCreated(data as unknown as BaseDeLeads);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+      <div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-foreground">Novo lead</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+            aria-label="Fechar"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="text-xs text-gray-500">
+            Nome
+            <input
+              value={form.nome_lead}
+              onChange={(e) => setForm((prev) => ({ ...prev, nome_lead: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Telefone
+            <input
+              value={form.telefone}
+              onChange={(e) => setForm((prev) => ({ ...prev, telefone: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            E-mail
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Origem
+            <input
+              value={form.origem}
+              onChange={(e) => setForm((prev) => ({ ...prev, origem: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Vendedor
+            <select
+              value={form.vendedor}
+              onChange={(e) => setForm((prev) => ({ ...prev, vendedor: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            >
+              <option value="">Sem vendedor</option>
+              {vendedores.map((vendedor) => (
+                <option key={vendedor.id} value={vendedor.vendedor ?? ''}>
+                  {vendedor.vendedor}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs text-gray-500">
+            Veiculo de interesse
+            <input
+              value={form.veiculo_interesse}
+              onChange={(e) => setForm((prev) => ({ ...prev, veiculo_interesse: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+          <label className="text-xs text-gray-500">
+            Valor
+            <input
+              type="number"
+              step="0.01"
+              value={form.valor}
+              onChange={(e) => setForm((prev) => ({ ...prev, valor: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+          <label className="text-xs text-gray-500 sm:col-span-2">
+            Observacao
+            <textarea
+              value={form.observacao_vendedor}
+              onChange={(e) => setForm((prev) => ({ ...prev, observacao_vendedor: e.target.value }))}
+              rows={3}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800"
+            />
+          </label>
+        </div>
+
+        {erro && <p className="mt-3 text-sm text-red-600">{erro}</p>}
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={criarLead}
+            disabled={salvando}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {salvando ? 'Salvando...' : 'Adicionar lead'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LeadsPage() {
   const [leads, setLeads] = useState<BaseDeLeads[]>([]);
+  const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
+  const [leadEtiquetas, setLeadEtiquetas] = useState<LeadEtiqueta[]>([]);
+  const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState(createDefaultLeadFilters);
+  const [leadSelecionado, setLeadSelecionado] = useState<BaseDeLeads | null>(null);
+  const [novoLeadAberto, setNovoLeadAberto] = useState(false);
+  const [vendedorPadrao, setVendedorPadrao] = useState('');
 
   useEffect(() => {
     let isMounted = true;
@@ -34,13 +235,30 @@ export default function LeadsPage() {
     async function fetchLeads() {
       setLoading(true);
       const supabase = createClient();
-      const { data, error } = await supabase
-        .from('BASE_DE_LEADS')
-        .select(
-          'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora"'
-        )
-        .not('estagio_lead', 'is', null)
-        .order('created_at', { ascending: false });
+      const [{ data, error }, { data: etiquetasData }, { data: leadEtiquetasData }, { data: vendedoresData }] =
+        await Promise.all([
+          supabase
+            .from('BASE_DE_LEADS')
+            .select(LEAD_SELECT)
+            .not('estagio_lead', 'is', null)
+            .order('created_at', { ascending: false }),
+          supabase.from('etiquetas').select('id, nome, cor, created_at').order('nome'),
+          supabase.from('lead_etiquetas').select('id, id_lead, id_etiqueta, created_at'),
+          supabase
+            .from('VENDEDORES')
+            .select('id, created_at, vendedor, telefone, atender, quantos_lead, id_click, id_empresa')
+            .order('vendedor'),
+        ]);
+
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (!userError && userData.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('nome')
+          .eq('id', userData.user.id)
+          .single();
+        if (isMounted) setVendedorPadrao((profile as { nome: string | null } | null)?.nome ?? '');
+      }
 
       if (!isMounted) return;
 
@@ -50,6 +268,9 @@ export default function LeadsPage() {
       } else {
         setLeads(((data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
       }
+      setEtiquetas((etiquetasData as Etiqueta[]) ?? []);
+      setLeadEtiquetas((leadEtiquetasData as LeadEtiqueta[]) ?? []);
+      setVendedores((vendedoresData as Vendedor[]) ?? []);
       setLoading(false);
     }
 
@@ -59,14 +280,41 @@ export default function LeadsPage() {
     };
   }, []);
 
-  const leadsFiltrados = useMemo(() => filterLeads(leads, filters), [leads, filters]);
+  const etiquetaIdsPorLead = useMemo(() => {
+    const map = new Map<number, Set<number>>();
+    leadEtiquetas.forEach((item) => {
+      const set = map.get(item.id_lead) ?? new Set<number>();
+      set.add(item.id_etiqueta);
+      map.set(item.id_lead, set);
+    });
+    return map;
+  }, [leadEtiquetas]);
+
+  const leadsFiltrados = useMemo(
+    () => filterLeads(leads, filters, etiquetaIdsPorLead),
+    [leads, filters, etiquetaIdsPorLead]
+  );
+
+  const idEmpresaPadrao = useMemo(() => leads.find((lead) => lead.id_empresa)?.id_empresa ?? 1, [leads]);
 
   function limparFiltros() {
     setFilters(createDefaultLeadFilters());
   }
 
+  function atualizarEtiquetasDoLead(leadId: number, etiquetaIds: number[]) {
+    setLeadEtiquetas((prev) => [
+      ...prev.filter((item) => item.id_lead !== leadId),
+      ...etiquetaIds.map((idEtiqueta) => ({
+        id: -idEtiqueta,
+        id_lead: leadId,
+        id_etiqueta: idEtiqueta,
+        created_at: new Date().toISOString(),
+      })),
+    ]);
+  }
+
   function exportarCsv() {
-    const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Vendedor', 'Veículo', 'Estágio', 'Valor', 'Criado em'];
+    const headers = ['Nome', 'Telefone', 'Email', 'Origem', 'Vendedor', 'Veiculo', 'Estagio', 'Valor', 'Criado em'];
     const rows = leadsFiltrados.map((l) => [
       l.nome_lead,
       l.telefone,
@@ -113,24 +361,39 @@ export default function LeadsPage() {
           <h1 className="text-2xl font-bold text-foreground">Leads</h1>
           <p className="text-sm text-gray-500">{leadsFiltrados.length} lead(s) encontrado(s)</p>
         </div>
-        <button
-          type="button"
-          onClick={exportarCsv}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-        >
-          Exportar CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setNovoLeadAberto(true)}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            Adicionar lead
+          </button>
+          <button
+            type="button"
+            onClick={exportarCsv}
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Exportar CSV
+          </button>
+        </div>
       </div>
 
-      <LeadFilters leads={leads} filters={filters} onChange={setFilters} onClear={limparFiltros} />
+      <LeadFilters
+        leads={leads}
+        filters={filters}
+        etiquetas={etiquetas}
+        onChange={setFilters}
+        onClear={limparFiltros}
+      />
 
       <div className="rounded-xl bg-card shadow-sm">
         <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr_1fr_0.8fr] gap-2 border-b border-gray-200 px-4 py-3 text-xs font-semibold uppercase text-gray-500">
           <span>Lead</span>
           <span>Origem</span>
           <span>Vendedor</span>
-          <span>Veículo</span>
-          <span>Estágio</span>
+          <span>Veiculo</span>
+          <span>Estagio</span>
           <span>Valor</span>
         </div>
 
@@ -144,9 +407,11 @@ export default function LeadsPage() {
               {rowVirtualizer.getVirtualItems().map((virtualRow) => {
                 const lead = leadsFiltrados[virtualRow.index];
                 return (
-                  <div
+                  <button
                     key={lead.id}
-                    className="absolute left-0 top-0 grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_0.8fr] items-center gap-2 border-b border-gray-100 px-4"
+                    type="button"
+                    onClick={() => setLeadSelecionado(lead)}
+                    className="absolute left-0 top-0 grid w-full grid-cols-[1.5fr_1fr_1fr_1fr_1fr_0.8fr] items-center gap-2 border-b border-gray-100 px-4 text-left hover:bg-gray-50"
                     style={{ height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
                   >
                     <div className="flex items-center gap-3 overflow-hidden">
@@ -154,8 +419,7 @@ export default function LeadsPage() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-foreground">{lead.nome_lead}</p>
                         <p className="truncate text-xs text-gray-500">
-                          {lead.telefone} ·{' '}
-                          {format(new Date(lead.created_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}
+                          {lead.telefone} - {format(new Date(lead.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}
                         </p>
                       </div>
                     </div>
@@ -164,21 +428,56 @@ export default function LeadsPage() {
                         className="h-2 w-2 rounded-full"
                         style={{ backgroundColor: getOrigemColor(lead.origem) }}
                       />
-                      {lead.origem ?? '—'}
+                      {lead.origem ?? '-'}
                     </div>
-                    <span className="truncate text-sm text-gray-700">{lead.vendedor ?? '—'}</span>
-                    <span className="truncate text-sm text-gray-700">{lead.veiculo_interesse ?? '—'}</span>
+                    <span className="truncate text-sm text-gray-700">{lead.vendedor ?? '-'}</span>
+                    <span className="truncate text-sm text-gray-700">{lead.veiculo_interesse ?? '-'}</span>
                     <StatusBadge estagio={lead.estagio_lead} />
                     <span className="text-sm font-medium text-foreground">
-                      {lead.valor != null ? currencyFormatter.format(lead.valor) : '—'}
+                      {lead.valor != null ? currencyFormatter.format(lead.valor) : '-'}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
         )}
       </div>
+
+      {novoLeadAberto && (
+        <NovoLeadModal
+          vendedores={vendedores}
+          idEmpresaPadrao={idEmpresaPadrao}
+          vendedorPadrao={vendedorPadrao}
+          onClose={() => setNovoLeadAberto(false)}
+          onCreated={(lead) => {
+            setLeads((prev) => [lead, ...prev]);
+            setLeadSelecionado(lead);
+            setNovoLeadAberto(false);
+          }}
+        />
+      )}
+
+      {leadSelecionado && (
+        <LeadDrawer
+          lead={leadSelecionado}
+          estagioLabel={
+            COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.label ?? 'Oportunidade'
+          }
+          estagioColor={
+            COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.color ?? '#22c55e'
+          }
+          estagioLabelOf={(estagio) =>
+            COLUNAS.find((c) => c.id === normalizeEstagio(estagio))?.label ?? estagio ?? 'Oportunidade'
+          }
+          onClose={() => setLeadSelecionado(null)}
+          onUpdated={(atualizado) => {
+            setLeadSelecionado(atualizado);
+            setLeads((prev) => prev.map((l) => (l.id === atualizado.id ? atualizado : l)));
+          }}
+          onEtiquetasChanged={atualizarEtiquetasDoLead}
+        />
+      )}
     </div>
   );
 }
