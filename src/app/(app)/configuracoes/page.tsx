@@ -382,8 +382,10 @@ function GerenciarUsuariosTab() {
 function EtiquetasTab() {
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [salvando, setSalvando] = useState(false);
   const [nome, setNome] = useState('');
   const [cor, setCor] = useState('#3b82f6');
+  const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
 
   useEffect(() => {
     async function fetchEtiquetas() {
@@ -398,25 +400,58 @@ function EtiquetasTab() {
 
   async function adicionar(e: React.FormEvent) {
     e.preventDefault();
-    if (!nome.trim()) return;
+    const nomeNormalizado = nome.trim();
+    if (!nomeNormalizado || salvando) return;
+
+    setSalvando(true);
+    setMensagem(null);
+
     const supabase = createClient();
     const { data, error } = await supabase
       .from('etiquetas')
-      .insert({ nome, cor })
+      .insert({ nome: nomeNormalizado, cor })
       .select('id, nome, cor, created_at')
       .single();
-    if (!error && data) {
-      setEtiquetas((prev) => [...prev, data as Etiqueta]);
-      setNome('');
+
+    setSalvando(false);
+
+    if (error) {
+      setMensagem({
+        tipo: 'erro',
+        texto:
+          error.code === '42501'
+            ? 'Você não tem permissão para criar etiquetas.'
+            : `Erro ao criar etiqueta: ${error.message}`,
+      });
+      return;
     }
+
+    if (!data) {
+      setMensagem({ tipo: 'erro', texto: 'Não foi possível criar a etiqueta.' });
+      return;
+    }
+
+    setEtiquetas((prev) => [...prev, data as Etiqueta]);
+    setNome('');
+    setMensagem({ tipo: 'sucesso', texto: 'Etiqueta criada com sucesso.' });
   }
 
   async function remover(id: number) {
+    setMensagem(null);
     const supabase = createClient();
     const { error } = await supabase.from('etiquetas').delete().eq('id', id);
-    if (!error) {
-      setEtiquetas((prev) => prev.filter((e) => e.id !== id));
+    if (error) {
+      setMensagem({
+        tipo: 'erro',
+        texto:
+          error.code === '42501'
+            ? 'Você não tem permissão para remover etiquetas.'
+            : `Erro ao remover etiqueta: ${error.message}`,
+      });
+      return;
     }
+
+    setEtiquetas((prev) => prev.filter((e) => e.id !== id));
   }
 
   return (
@@ -427,6 +462,7 @@ function EtiquetasTab() {
           <input
             value={nome}
             onChange={(e) => setNome(e.target.value)}
+            disabled={salvando}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
           />
         </div>
@@ -436,13 +472,24 @@ function EtiquetasTab() {
             type="color"
             value={cor}
             onChange={(e) => setCor(e.target.value)}
+            disabled={salvando}
             className="h-10 w-14 rounded-lg border border-gray-300"
           />
         </div>
-        <button type="submit" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white">
-          Adicionar
+        <button
+          type="submit"
+          disabled={salvando || !nome.trim()}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          {salvando ? 'Adicionando...' : 'Adicionar'}
         </button>
       </form>
+
+      {mensagem && (
+        <p className={`text-sm ${mensagem.tipo === 'erro' ? 'text-red-600' : 'text-green-600'}`}>
+          {mensagem.texto}
+        </p>
+      )}
 
       {loading ? (
         <p className="text-sm text-gray-500">Carregando...</p>
