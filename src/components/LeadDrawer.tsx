@@ -165,17 +165,16 @@ export function LeadDrawer({
 
     const valorNumerico = campos.valor ? Number(campos.valor.replace(',', '.')) : 0;
 
-    const { error } = await supabase
-      .from('BASE_DE_LEADS')
-      .update({
-        nome_lead: nomeLead,
-        cpf: campos.cpf || null,
-        data_nascimento: campos.data_nascimento || null,
-        veiculo_interesse: campos.veiculo_interesse || null,
-        valor: valorNumerico,
-        vendedor: campos.vendedor || null,
-      })
-      .eq('id', lead.id);
+    const vendedorNormalizado = campos.vendedor.trim() || null;
+    const { error } = await supabase.rpc('salvar_dados_lead', {
+      p_id: lead.id,
+      p_nome_lead: nomeLead,
+      p_cpf: campos.cpf || null,
+      p_data_nascimento: campos.data_nascimento || null,
+      p_veiculo_interesse: campos.veiculo_interesse || null,
+      p_valor: valorNumerico,
+      p_vendedor: vendedorNormalizado,
+    });
 
     setSalvandoCampos(false);
 
@@ -192,7 +191,7 @@ export function LeadDrawer({
       data_nascimento: campos.data_nascimento || null,
       veiculo_interesse: campos.veiculo_interesse || null,
       valor: valorNumerico,
-      vendedor: campos.vendedor || null,
+      vendedor: vendedorNormalizado,
     });
     setTimeout(() => setMensagemCampos(null), 3000);
   }
