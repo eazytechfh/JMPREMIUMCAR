@@ -79,7 +79,7 @@ export default function ConfiguracoesPage() {
       {tab === 'novo-usuario' && <CriarUsuarioTab />}
       {tab === 'usuarios' && <GerenciarUsuariosTab />}
       {tab === 'etiquetas' && <EtiquetasTab podeGerenciar={podeGerenciarUsuarios} />}
-      {tab === 'fila' && <FilaAtendimentoTab />}
+      {tab === 'fila' && <FilaAtendimentoTab podeGerenciar={podeGerenciarUsuarios} />}
       {tab === 'credenciais' && isAdminMaster && <CredenciaisTab />}
       {tab === 'aparencia' && isAdminMaster && <AparenciaTab />}
     </div>
@@ -531,29 +531,60 @@ function EtiquetasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
   );
 }
 
-function FilaAtendimentoTab() {
+function FilaAtendimentoTab({ podeGerenciar }: { podeGerenciar: boolean }) {
   const [vendedores, setVendedores] = useState<Vendedor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [acaoEmAndamento, setAcaoEmAndamento] = useState<number | null>(null);
+  const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
+
+  async function fetchFila() {
+    setLoading(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('VENDEDORES')
+      .select('id, created_at, vendedor, telefone, atender, quantos_lead, id_click, id_empresa')
+      .order('id', { ascending: true });
+
+    if (error) {
+      console.error('Erro ao buscar fila de atendimento:', error.message);
+      setVendedores([]);
+    } else {
+      setVendedores((data as Vendedor[]) ?? []);
+    }
+    setLoading(false);
+  }
 
   useEffect(() => {
-    async function fetchFila() {
-      setLoading(true);
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from('VENDEDORES')
-        .select('id, created_at, vendedor, telefone, atender, quantos_lead, id_click, id_empresa')
-        .order('id', { ascending: true });
-
-      if (error) {
-        console.error('Erro ao buscar fila de atendimento:', error.message);
-        setVendedores([]);
-      } else {
-        setVendedores((data as Vendedor[]) ?? []);
-      }
-      setLoading(false);
-    }
     fetchFila();
   }, []);
+
+  async function definirDaVez(vendedorId: number) {
+    if (!podeGerenciar) {
+      setMensagem({ tipo: 'erro', texto: 'Você não tem permissão para alterar a fila.' });
+      return;
+    }
+
+    setAcaoEmAndamento(vendedorId);
+    setMensagem(null);
+
+    const supabase = createClient();
+    const { error } = await supabase.rpc('definir_vendedor_da_vez', { p_vendedor_id: vendedorId });
+
+    setAcaoEmAndamento(null);
+
+    if (error) {
+      setMensagem({ tipo: 'erro', texto: `Erro ao alterar vendedor da vez: ${error.message}` });
+      return;
+    }
+
+    setVendedores((prev) =>
+      prev.map((vendedor) => ({
+        ...vendedor,
+        atender: vendedor.id === vendedorId ? 'vez' : 'espera',
+      }))
+    );
+    setMensagem({ tipo: 'sucesso', texto: 'Vendedor da vez atualizado.' });
+  }
 
   if (loading) return <p className="text-sm text-gray-500">Carregando...</p>;
 
@@ -570,6 +601,16 @@ function FilaAtendimentoTab() {
 
   return (
     <div className="max-w-2xl space-y-6">
+      {mensagem && (
+        <p
+          className={`rounded-lg px-4 py-2 text-sm ${
+            mensagem.tipo === 'erro' ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+          }`}
+        >
+          {mensagem.texto}
+        </p>
+      )}
+
       <section>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-400">
           Vendedor da vez
@@ -620,6 +661,16 @@ function FilaAtendimentoTab() {
                   <p className="text-xs text-gray-500">{v.telefone ?? '—'}</p>
                 </div>
                 <span className="text-xs text-gray-500">{v.quantos_lead ?? 0} leads</span>
+                {podeGerenciar && (
+                  <button
+                    type="button"
+                    onClick={() => definirDaVez(v.id)}
+                    disabled={acaoEmAndamento === v.id}
+                    className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-60"
+                  >
+                    {acaoEmAndamento === v.id ? 'Alterando...' : 'Colocar na vez'}
+                  </button>
+                )}
               </li>
             ))}
           </ol>
@@ -643,6 +694,16 @@ function FilaAtendimentoTab() {
                   <p className="text-xs text-gray-500">{v.telefone ?? '—'}</p>
                 </div>
                 <span className="text-xs text-gray-400">atender: {v.atender ?? '—'}</span>
+                {podeGerenciar && (
+                  <button
+                    type="button"
+                    onClick={() => definirDaVez(v.id)}
+                    disabled={acaoEmAndamento === v.id}
+                    className="rounded-lg border border-green-300 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 disabled:opacity-60"
+                  >
+                    {acaoEmAndamento === v.id ? 'Alterando...' : 'Colocar na vez'}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
