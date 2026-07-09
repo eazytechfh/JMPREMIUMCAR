@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -258,6 +259,7 @@ function NovoLeadModal({ vendedores, idEmpresaPadrao, vendedorPadrao, onClose, o
 }
 
 export default function LeadsPage() {
+  const searchParams = useSearchParams();
   const [leads, setLeads] = useState<BaseDeLeads[]>([]);
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
   const [leadEtiquetas, setLeadEtiquetas] = useState<LeadEtiqueta[]>([]);
@@ -330,6 +332,14 @@ export default function LeadsPage() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const leadId = Number(searchParams.get('lead'));
+    if (!leadId || loading) return;
+
+    const lead = leads.find((item) => item.id === leadId);
+    if (lead) setLeadSelecionado(lead);
+  }, [leads, loading, searchParams]);
 
   const etiquetaIdsPorLead = useMemo(() => {
     const map = new Map<number, Set<number>>();

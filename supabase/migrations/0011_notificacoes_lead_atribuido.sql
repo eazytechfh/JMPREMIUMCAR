@@ -47,8 +47,8 @@ begin
   select
     profiles.id,
     new.id,
-    'Novo lead atribuido',
-    coalesce(new.nome_lead, 'Lead') || ' foi atribuido a voce.'
+    'Novo lead atribuído',
+    coalesce(new.nome_lead, 'Lead') || ' foi atribuído a você.'
   from public.profiles
   where profiles.cargo = 'vendedor'
     and profiles.nome = new.vendedor
