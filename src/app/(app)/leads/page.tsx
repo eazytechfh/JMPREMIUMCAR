@@ -19,8 +19,11 @@ const ORIGEM_DOT_COLORS: Record<string, string> = {
   indicacao: '#f97316',
 };
 
-const LEAD_SELECT =
+const LEAD_SELECT_BASE =
   'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfa\u00e7\u00e3o", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
+
+const LEAD_SELECT =
+  'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, ordem_pipeline, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfa\u00e7\u00e3o", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
 
 const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFIG>).map((id) => ({
   id,
@@ -39,6 +42,11 @@ function normalizeEstagio(estagio: string | null | undefined): ColunaId {
 function getOrigemColor(origem: string | null): string {
   if (!origem) return '#6b7280';
   return ORIGEM_DOT_COLORS[origem.toLowerCase()] ?? '#6b7280';
+}
+
+function isOrdemPipelineMissing(error: { message?: string; details?: string | null } | null): boolean {
+  const text = `${error?.message ?? ''} ${error?.details ?? ''}`.toLowerCase();
+  return text.includes('ordem_pipeline');
 }
 
 interface NovoLeadModalProps {
@@ -63,6 +71,23 @@ function NovoLeadModal({ vendedores, idEmpresaPadrao, vendedorPadrao, onClose, o
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
+  async function buscarProximaOrdemPipeline(estagio: string): Promise<number> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('BASE_DE_LEADS')
+      .select('ordem_pipeline')
+      .eq('estagio_lead', estagio)
+      .not('ordem_pipeline', 'is', null)
+      .order('ordem_pipeline', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (isOrdemPipelineMissing(error)) return 0;
+
+    const ordemAtual = (data as { ordem_pipeline: number | null } | null)?.ordem_pipeline ?? 0;
+    return ordemAtual + 1;
+  }
+
   async function criarLead() {
     if (!form.nome_lead.trim() || !form.telefone.trim()) {
       setErro('Informe nome e telefone para criar o lead.');
@@ -74,22 +99,36 @@ function NovoLeadModal({ vendedores, idEmpresaPadrao, vendedorPadrao, onClose, o
 
     const valorNumerico = form.valor ? Number(form.valor.replace(',', '.')) : null;
     const supabase = createClient();
-    const { data, error } = await supabase
+    const estagioInicial = 'oportunidade';
+    const ordemPipeline = await buscarProximaOrdemPipeline(estagioInicial);
+    const payload = {
+      id_empresa: idEmpresaPadrao,
+      nome_lead: form.nome_lead.trim(),
+      telefone: form.telefone.trim(),
+      email: form.email.trim() || null,
+      origem: form.origem.trim() || 'manual',
+      vendedor: form.vendedor || null,
+      veiculo_interesse: form.veiculo_interesse.trim() || null,
+      valor: typeof valorNumerico === 'number' && Number.isFinite(valorNumerico) ? valorNumerico : null,
+      observacao_vendedor: form.observacao_vendedor.trim() || null,
+      estagio_lead: estagioInicial,
+    };
+    let result = await supabase
       .from('BASE_DE_LEADS')
       .insert({
-        id_empresa: idEmpresaPadrao,
-        nome_lead: form.nome_lead.trim(),
-        telefone: form.telefone.trim(),
-        email: form.email.trim() || null,
-        origem: form.origem.trim() || 'manual',
-        vendedor: form.vendedor || null,
-        veiculo_interesse: form.veiculo_interesse.trim() || null,
-        valor: typeof valorNumerico === 'number' && Number.isFinite(valorNumerico) ? valorNumerico : null,
-        observacao_vendedor: form.observacao_vendedor.trim() || null,
-        estagio_lead: 'oportunidade',
+        ...payload,
+        ordem_pipeline: ordemPipeline,
       })
       .select(LEAD_SELECT)
       .single();
+    let data = result.data;
+    let error = result.error;
+
+    if (isOrdemPipelineMissing(error)) {
+      const fallback = await supabase.from('BASE_DE_LEADS').insert(payload).select(LEAD_SELECT_BASE).single();
+      data = fallback.data as typeof data;
+      error = fallback.error;
+    }
 
     setSalvando(false);
 
@@ -235,13 +274,25 @@ export default function LeadsPage() {
     async function fetchLeads() {
       setLoading(true);
       const supabase = createClient();
-      const [{ data, error }, { data: etiquetasData }, { data: leadEtiquetasData }, { data: vendedoresData }] =
+      let leadsResult: {
+        data: unknown;
+        error: { message?: string; details?: string | null } | null;
+      } = await supabase
+        .from('BASE_DE_LEADS')
+        .select(LEAD_SELECT)
+        .not('estagio_lead', 'is', null)
+        .order('created_at', { ascending: false });
+
+      if (isOrdemPipelineMissing(leadsResult.error)) {
+        leadsResult = await supabase
+          .from('BASE_DE_LEADS')
+          .select(LEAD_SELECT_BASE)
+          .not('estagio_lead', 'is', null)
+          .order('created_at', { ascending: false });
+      }
+
+      const [{ data: etiquetasData }, { data: leadEtiquetasData }, { data: vendedoresData }] =
         await Promise.all([
-          supabase
-            .from('BASE_DE_LEADS')
-            .select(LEAD_SELECT)
-            .not('estagio_lead', 'is', null)
-            .order('created_at', { ascending: false }),
           supabase.from('etiquetas').select('id, nome, cor, created_at').order('nome'),
           supabase.from('lead_etiquetas').select('id, id_lead, id_etiqueta, created_at'),
           supabase
@@ -262,11 +313,11 @@ export default function LeadsPage() {
 
       if (!isMounted) return;
 
-      if (error) {
-        console.error('Erro ao buscar leads:', error.message);
+      if (leadsResult.error) {
+        console.error('Erro ao buscar leads:', leadsResult.error.message);
         setLeads([]);
       } else {
-        setLeads(((data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
+        setLeads(((leadsResult.data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
       }
       setEtiquetas((etiquetasData as Etiqueta[]) ?? []);
       setLeadEtiquetas((leadEtiquetasData as LeadEtiqueta[]) ?? []);

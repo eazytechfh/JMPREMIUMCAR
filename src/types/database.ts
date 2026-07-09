@@ -25,6 +25,7 @@ export interface BaseDeLeads {
   veiculo_interesse: string | null;
   resumo_qualificacao: string | null;
   estagio_lead: string | null;
+  ordem_pipeline: number | null;
   resumo_comercial: string | null;
   created_at: string;
   updated_at: string | null;

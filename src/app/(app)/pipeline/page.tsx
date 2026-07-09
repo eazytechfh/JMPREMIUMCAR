@@ -30,12 +30,30 @@ const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFI
 
 const LEADS_PER_COLUMN_PAGE = 12;
 
+const LEAD_SELECT_BASE =
+  'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
+
+const LEAD_SELECT =
+  'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, ordem_pipeline, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
+
 type ColunaId = (typeof COLUNAS)[number]['id'];
 
 function normalizeEstagio(estagio: string | null | undefined): ColunaId {
   const key = (estagio ?? '').toLowerCase().trim();
   const found = COLUNAS.find((c) => c.id === key);
   return found ? found.id : 'oportunidade';
+}
+
+function sortByPipelineOrder(a: BaseDeLeads, b: BaseDeLeads): number {
+  const orderA = a.ordem_pipeline ?? Number.MAX_SAFE_INTEGER;
+  const orderB = b.ordem_pipeline ?? Number.MAX_SAFE_INTEGER;
+  if (orderA !== orderB) return orderA - orderB;
+  return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+}
+
+function isOrdemPipelineMissing(error: { message?: string; details?: string | null } | null): boolean {
+  const text = `${error?.message ?? ''} ${error?.details ?? ''}`.toLowerCase();
+  return text.includes('ordem_pipeline');
 }
 
 interface CardProps {
@@ -227,25 +245,36 @@ export default function PipelinePage() {
     async function fetchLeads() {
       setLoading(true);
       const supabase = createClient();
-      const [{ data, error }, { data: etiquetasData }, { data: leadEtiquetasData }] = await Promise.all([
-        supabase
+      let leadsResult: {
+        data: unknown;
+        error: { message?: string; details?: string | null } | null;
+      } = await supabase
+        .from('BASE_DE_LEADS')
+        .select(LEAD_SELECT)
+        .not('estagio_lead', 'is', null)
+        .order('ordem_pipeline', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
+
+      if (isOrdemPipelineMissing(leadsResult.error)) {
+        leadsResult = await supabase
           .from('BASE_DE_LEADS')
-          .select(
-            'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa'
-          )
+          .select(LEAD_SELECT_BASE)
           .not('estagio_lead', 'is', null)
-          .order('created_at', { ascending: false }),
+          .order('created_at', { ascending: false });
+      }
+
+      const [{ data: etiquetasData }, { data: leadEtiquetasData }] = await Promise.all([
         supabase.from('etiquetas').select('id, nome, cor, created_at').order('nome'),
         supabase.from('lead_etiquetas').select('id, id_lead, id_etiqueta, created_at'),
       ]);
 
       if (!isMounted) return;
 
-      if (error) {
-        console.error('Erro ao buscar leads:', error.message);
+      if (leadsResult.error) {
+        console.error('Erro ao buscar leads:', leadsResult.error.message);
         setLeads([]);
       } else {
-        setLeads(((data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
+        setLeads(((leadsResult.data as unknown as BaseDeLeads[]) ?? []).filter((lead) => lead.estagio_lead !== null));
       }
       setEtiquetas((etiquetasData as Etiqueta[]) ?? []);
       setLeadEtiquetas((leadEtiquetasData as LeadEtiqueta[]) ?? []);
@@ -293,6 +322,7 @@ export default function PipelinePage() {
       const coluna = normalizeEstagio(lead.estagio_lead);
       map.get(coluna)?.push(lead);
     });
+    map.forEach((lista) => lista.sort(sortByPipelineOrder));
     return map;
   }, [leadsFiltrados]);
 
@@ -339,6 +369,23 @@ export default function PipelinePage() {
     setFilters((prev) => ({ ...prev, etiquetaFiltro: String(etiqueta.id) }));
   }
 
+  async function buscarProximaOrdemPipeline(estagio: string): Promise<number> {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('BASE_DE_LEADS')
+      .select('ordem_pipeline')
+      .eq('estagio_lead', estagio)
+      .not('ordem_pipeline', 'is', null)
+      .order('ordem_pipeline', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (isOrdemPipelineMissing(error)) return 0;
+
+    const ordemAtual = (data as { ordem_pipeline: number | null } | null)?.ordem_pipeline ?? 0;
+    return ordemAtual + 1;
+  }
+
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over) return;
@@ -354,23 +401,32 @@ export default function PipelinePage() {
 
     const estagioAnterior = leadAtual.estagio_lead;
     if (normalizeEstagio(estagioAnterior) === novoEstagio) return;
+    const ordemAnterior = leadAtual.ordem_pipeline;
+    const novaOrdem = await buscarProximaOrdemPipeline(novoEstagio);
 
     // Optimistic update: atualiza a UI imediatamente para dar sensação de resposta instantânea
     // no drag and drop, antes mesmo de confirmar a escrita no banco.
     setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, estagio_lead: novoEstagio } : l))
+      prev.map((l) => (l.id === leadId ? { ...l, estagio_lead: novoEstagio, ordem_pipeline: novaOrdem } : l))
     );
 
     const supabase = createClient();
-    const { error } = await supabase
+    let { error } = await supabase
       .from('BASE_DE_LEADS')
-      .update({ estagio_lead: novoEstagio })
+      .update({ estagio_lead: novoEstagio, ordem_pipeline: novaOrdem })
       .eq('id', leadId);
+
+    if (isOrdemPipelineMissing(error)) {
+      const fallback = await supabase.from('BASE_DE_LEADS').update({ estagio_lead: novoEstagio }).eq('id', leadId);
+      error = fallback.error;
+    }
 
     if (error) {
       // Rollback em caso de erro de escrita, e aviso simples ao usuário.
       setLeads((prev) =>
-        prev.map((l) => (l.id === leadId ? { ...l, estagio_lead: estagioAnterior } : l))
+        prev.map((l) =>
+          l.id === leadId ? { ...l, estagio_lead: estagioAnterior, ordem_pipeline: ordemAnterior } : l
+        )
       );
       setErrorMessage('Não foi possível mover o lead. Tente novamente.');
       setTimeout(() => setErrorMessage(null), 4000);

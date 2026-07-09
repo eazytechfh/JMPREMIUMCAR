@@ -78,7 +78,7 @@ export default function ConfiguracoesPage() {
 
       {tab === 'novo-usuario' && <CriarUsuarioTab />}
       {tab === 'usuarios' && <GerenciarUsuariosTab />}
-      {tab === 'etiquetas' && <EtiquetasTab />}
+      {tab === 'etiquetas' && <EtiquetasTab podeGerenciar={podeGerenciarUsuarios} />}
       {tab === 'fila' && <FilaAtendimentoTab />}
       {tab === 'credenciais' && isAdminMaster && <CredenciaisTab />}
       {tab === 'aparencia' && isAdminMaster && <AparenciaTab />}
@@ -379,7 +379,7 @@ function GerenciarUsuariosTab() {
   );
 }
 
-function EtiquetasTab() {
+function EtiquetasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -400,6 +400,10 @@ function EtiquetasTab() {
 
   async function adicionar(e: React.FormEvent) {
     e.preventDefault();
+    if (!podeGerenciar) {
+      setMensagem({ tipo: 'erro', texto: 'Você não tem permissão para criar etiquetas.' });
+      return;
+    }
     const nomeNormalizado = nome.trim();
     if (!nomeNormalizado || salvando) return;
 
@@ -438,6 +442,10 @@ function EtiquetasTab() {
 
   async function remover(id: number) {
     setMensagem(null);
+    if (!podeGerenciar) {
+      setMensagem({ tipo: 'erro', texto: 'Você não tem permissão para remover etiquetas.' });
+      return;
+    }
     const supabase = createClient();
     const { error } = await supabase.from('etiquetas').delete().eq('id', id);
     if (error) {
@@ -456,34 +464,36 @@ function EtiquetasTab() {
 
   return (
     <div className="max-w-lg space-y-4">
-      <form onSubmit={adicionar} className="flex items-end gap-2 rounded-xl bg-card p-4 shadow-sm">
-        <div className="flex-1">
-          <label className="mb-1 block text-sm font-medium text-gray-700">Nome</label>
-          <input
-            value={nome}
-            onChange={(e) => setNome(e.target.value)}
-            disabled={salvando}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Cor</label>
-          <input
-            type="color"
-            value={cor}
-            onChange={(e) => setCor(e.target.value)}
-            disabled={salvando}
-            className="h-10 w-14 rounded-lg border border-gray-300"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={salvando || !nome.trim()}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-        >
-          {salvando ? 'Adicionando...' : 'Adicionar'}
-        </button>
-      </form>
+      {podeGerenciar && (
+        <form onSubmit={adicionar} className="flex items-end gap-2 rounded-xl bg-card p-4 shadow-sm">
+          <div className="flex-1">
+            <label className="mb-1 block text-sm font-medium text-gray-700">Nome</label>
+            <input
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              disabled={salvando}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Cor</label>
+            <input
+              type="color"
+              value={cor}
+              onChange={(e) => setCor(e.target.value)}
+              disabled={salvando}
+              className="h-10 w-14 rounded-lg border border-gray-300"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={salvando || !nome.trim()}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {salvando ? 'Adicionando...' : 'Adicionar'}
+          </button>
+        </form>
+      )}
 
       {mensagem && (
         <p className={`text-sm ${mensagem.tipo === 'erro' ? 'text-red-600' : 'text-green-600'}`}>
@@ -504,13 +514,15 @@ function EtiquetasTab() {
                 <span className="h-3 w-3 rounded-full" style={{ backgroundColor: etq.cor }} />
                 <span className="text-sm text-gray-800">{etq.nome}</span>
               </div>
-              <button
-                type="button"
-                onClick={() => remover(etq.id)}
-                className="text-xs text-red-600 hover:underline"
-              >
-                Remover
-              </button>
+              {podeGerenciar && (
+                <button
+                  type="button"
+                  onClick={() => remover(etq.id)}
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Remover
+                </button>
+              )}
             </li>
           ))}
         </ul>

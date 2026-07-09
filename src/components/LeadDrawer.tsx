@@ -59,6 +59,7 @@ export function LeadDrawer({
   const [salvandoObservacao, setSalvandoObservacao] = useState(false);
 
   const [campos, setCampos] = useState({
+    nome_lead: lead.nome_lead ?? '',
     cpf: lead.cpf ?? '',
     data_nascimento: lead.data_nascimento ?? '',
     veiculo_interesse: lead.veiculo_interesse ?? '',
@@ -71,13 +72,23 @@ export function LeadDrawer({
   useEffect(() => {
     setObservacao(lead.observacao_vendedor ?? '');
     setCampos({
+      nome_lead: lead.nome_lead ?? '',
       cpf: lead.cpf ?? '',
       data_nascimento: lead.data_nascimento ?? '',
       veiculo_interesse: lead.veiculo_interesse ?? '',
       valor: lead.valor !== null ? String(lead.valor) : '',
       vendedor: lead.vendedor ?? '',
     });
-  }, [lead.id, lead.observacao_vendedor, lead.cpf, lead.data_nascimento, lead.veiculo_interesse, lead.valor, lead.vendedor]);
+  }, [
+    lead.id,
+    lead.nome_lead,
+    lead.observacao_vendedor,
+    lead.cpf,
+    lead.data_nascimento,
+    lead.veiculo_interesse,
+    lead.valor,
+    lead.vendedor,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -144,12 +155,20 @@ export function LeadDrawer({
     setSalvandoCampos(true);
     setMensagemCampos(null);
     const supabase = createClient();
+    const nomeLead = campos.nome_lead.trim();
+
+    if (!nomeLead) {
+      setMensagemCampos('Informe o nome do lead.');
+      setSalvandoCampos(false);
+      return;
+    }
 
     const valorNumerico = campos.valor ? Number(campos.valor.replace(',', '.')) : 0;
 
     const { error } = await supabase
       .from('BASE_DE_LEADS')
       .update({
+        nome_lead: nomeLead,
         cpf: campos.cpf || null,
         data_nascimento: campos.data_nascimento || null,
         veiculo_interesse: campos.veiculo_interesse || null,
@@ -168,6 +187,7 @@ export function LeadDrawer({
     setMensagemCampos('Alterações salvas.');
     onUpdated({
       ...lead,
+      nome_lead: nomeLead,
       cpf: campos.cpf || null,
       data_nascimento: campos.data_nascimento || null,
       veiculo_interesse: campos.veiculo_interesse || null,
@@ -239,6 +259,14 @@ export function LeadDrawer({
               Dados Pessoais
             </h3>
             <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="mb-1 block text-xs text-gray-500">Nome do lead</label>
+                <input
+                  value={campos.nome_lead}
+                  onChange={(e) => setCampos((c) => ({ ...c, nome_lead: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm"
+                />
+              </div>
               <div>
                 <label className="mb-1 block text-xs text-gray-500">CPF</label>
                 <input
