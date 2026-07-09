@@ -180,7 +180,7 @@ export function LeadDrawer({
     setSalvandoCampos(false);
 
     if (error) {
-      setMensagemCampos('Erro ao salvar alterações.');
+      setMensagemCampos(`Erro ao salvar alterações: ${error.message}`);
       return;
     }
 

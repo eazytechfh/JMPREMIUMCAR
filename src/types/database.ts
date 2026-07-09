@@ -70,6 +70,16 @@ export interface LeadHistoricoEstagio {
   created_at: string;
 }
 
+export interface LeadNotificacao {
+  id: number;
+  id_usuario: string;
+  id_lead: number;
+  titulo: string;
+  mensagem: string;
+  lida: boolean;
+  created_at: string;
+}
+
 export interface Vendedor {
   id: number;
   created_at: string;

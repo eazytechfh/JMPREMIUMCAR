@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { Sidebar } from '@/components/Sidebar';
+import { LeadAssignmentNotifications } from '@/components/LeadAssignmentNotifications';
 import { fetchBranding } from '@/lib/branding';
 import type { Profile } from '@/types/database';
 
@@ -26,6 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar userName={userName} userCargo={userCargo} logoUrl={branding.logo_url} />
+      <LeadAssignmentNotifications userCargo={userCargo} />
       <main className="h-screen min-w-0 flex-1 overflow-y-auto p-8">{children}</main>
     </div>
   );
