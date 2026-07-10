@@ -17,12 +17,10 @@ import { Avatar } from '@/components/Avatar';
 import { LeadDrawer } from '@/components/LeadDrawer';
 import { LeadFilters, createDefaultLeadFilters, filterLeads } from '@/components/LeadFilters';
 import { ESTAGIO_CONFIG } from '@/components/StatusBadge';
+import { DEFAULT_PIPELINE_STAGES, type PipelineStage } from '@/lib/pipeline-stages';
 
-// As colunas do Pipeline são geradas a partir de ESTAGIO_CONFIG (StatusBadge.tsx), que contém
-// exatamente os valores aceitos pela constraint CHECK de estagio_lead no banco. Não adicione um
-// estágio aqui sem confirmar antes que o valor existe na constraint real — caso contrário o
-// drag-and-drop vai falhar com erro 23514 ao tentar salvar.
-const COLUNAS = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFIG>).map((id) => ({
+// Fallback usado enquanto a tabela configurável ainda está carregando (ou antes da migration).
+const COLUNAS_PADRAO = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFIG>).map((id) => ({
   id,
   label: ESTAGIO_CONFIG[id].label,
   color: ESTAGIO_CONFIG[id].color,
@@ -36,11 +34,11 @@ const LEAD_SELECT_BASE =
 const LEAD_SELECT =
   'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, ordem_pipeline, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
 
-type ColunaId = (typeof COLUNAS)[number]['id'];
+type ColunaId = string;
 
-function normalizeEstagio(estagio: string | null | undefined): ColunaId {
+function normalizeEstagio(estagio: string | null | undefined, colunas = COLUNAS_PADRAO): ColunaId {
   const key = (estagio ?? '').toLowerCase().trim();
-  const found = COLUNAS.find((c) => c.id === key);
+  const found = colunas.find((c) => c.id === key);
   return found ? found.id : 'oportunidade';
 }
 
@@ -207,6 +205,7 @@ function Column({
 }
 
 export default function PipelinePage() {
+  const [etapas, setEtapas] = useState<PipelineStage[]>(DEFAULT_PIPELINE_STAGES);
   const [leads, setLeads] = useState<BaseDeLeads[]>([]);
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
   const [leadEtiquetas, setLeadEtiquetas] = useState<LeadEtiqueta[]>([]);
@@ -263,9 +262,10 @@ export default function PipelinePage() {
           .order('created_at', { ascending: false });
       }
 
-      const [{ data: etiquetasData }, { data: leadEtiquetasData }] = await Promise.all([
+      const [{ data: etiquetasData }, { data: leadEtiquetasData }, etapasResult] = await Promise.all([
         supabase.from('etiquetas').select('id, nome, cor, created_at').order('nome'),
         supabase.from('lead_etiquetas').select('id, id_lead, id_etiqueta, created_at'),
+        supabase.from('pipeline_etapas').select('id, slug, nome, cor, ordem').order('ordem'),
       ]);
 
       if (!isMounted) return;
@@ -278,6 +278,7 @@ export default function PipelinePage() {
       }
       setEtiquetas((etiquetasData as Etiqueta[]) ?? []);
       setLeadEtiquetas((leadEtiquetasData as LeadEtiqueta[]) ?? []);
+      if (!etapasResult.error && etapasResult.data?.length) setEtapas(etapasResult.data as PipelineStage[]);
       setLoading(false);
     }
 
@@ -286,6 +287,11 @@ export default function PipelinePage() {
       isMounted = false;
     };
   }, []);
+
+  const colunas = useMemo(
+    () => etapas.map((etapa) => ({ id: etapa.slug, label: etapa.nome, color: etapa.cor })),
+    [etapas]
+  );
 
   const etiquetaById = useMemo(() => new Map(etiquetas.map((etiqueta) => [etiqueta.id, etiqueta])), [etiquetas]);
 
@@ -317,21 +323,21 @@ export default function PipelinePage() {
   );
 
   const leadsPorColuna = useMemo(() => {
-    const map = new Map<ColunaId, BaseDeLeads[]>(COLUNAS.map((c) => [c.id, []]));
+    const map = new Map<ColunaId, BaseDeLeads[]>(colunas.map((c) => [c.id, []]));
     leadsFiltrados.forEach((lead) => {
-      const coluna = normalizeEstagio(lead.estagio_lead);
+      const coluna = normalizeEstagio(lead.estagio_lead, colunas);
       map.get(coluna)?.push(lead);
     });
     map.forEach((lista) => lista.sort(sortByPipelineOrder));
     return map;
-  }, [leadsFiltrados]);
+  }, [colunas, leadsFiltrados]);
 
   useEffect(() => {
     setColumnPages((prev) => {
       let changed = false;
       const next = { ...prev };
 
-      COLUNAS.forEach((coluna) => {
+      colunas.forEach((coluna) => {
         const total = leadsPorColuna.get(coluna.id)?.length ?? 0;
         const totalPages = Math.max(1, Math.ceil(total / LEADS_PER_COLUMN_PAGE));
         const current = next[coluna.id] ?? 1;
@@ -347,7 +353,7 @@ export default function PipelinePage() {
 
       return changed ? next : prev;
     });
-  }, [leadsPorColuna]);
+  }, [colunas, leadsPorColuna]);
 
   function limparFiltros() {
     setFilters(createDefaultLeadFilters());
@@ -391,16 +397,16 @@ export default function PipelinePage() {
     if (!over) return;
 
     const leadId = Number(active.id);
-    const colunaDestino = COLUNAS.find((coluna) => coluna.id === over.id)?.id;
+    const colunaDestino = colunas.find((coluna) => coluna.id === over.id)?.id;
     const leadDestino = leads.find((lead) => lead.id === Number(over.id));
-    const novoEstagio = colunaDestino ?? (leadDestino ? normalizeEstagio(leadDestino.estagio_lead) : null);
+    const novoEstagio = colunaDestino ?? (leadDestino ? normalizeEstagio(leadDestino.estagio_lead, colunas) : null);
     if (!novoEstagio) return;
 
     const leadAtual = leads.find((l) => l.id === leadId);
     if (!leadAtual) return;
 
     const estagioAnterior = leadAtual.estagio_lead;
-    if (normalizeEstagio(estagioAnterior) === novoEstagio) return;
+    if (normalizeEstagio(estagioAnterior, colunas) === novoEstagio) return;
     const ordemAnterior = leadAtual.ordem_pipeline;
     const novaOrdem = await buscarPrimeiraOrdemPipeline(novoEstagio);
 
@@ -470,7 +476,7 @@ export default function PipelinePage() {
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <div className="min-h-0 flex-1 overflow-x-auto pb-2">
             <div className="flex h-full gap-4">
-            {COLUNAS.map((coluna) => (
+            {colunas.map((coluna) => (
               <Column
                 key={coluna.id}
                 id={coluna.id}
@@ -493,15 +499,15 @@ export default function PipelinePage() {
         <LeadDrawer
           lead={leadSelecionado}
           estagioLabel={
-            COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.label ??
+            colunas.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead, colunas))?.label ??
             'Oportunidade'
           }
           estagioColor={
-            COLUNAS.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead))?.color ??
+            colunas.find((c) => c.id === normalizeEstagio(leadSelecionado.estagio_lead, colunas))?.color ??
             '#22c55e'
           }
           estagioLabelOf={(estagio) =>
-            COLUNAS.find((c) => c.id === normalizeEstagio(estagio))?.label ?? estagio ?? 'Oportunidade'
+            colunas.find((c) => c.id === normalizeEstagio(estagio, colunas))?.label ?? estagio ?? 'Oportunidade'
           }
           onClose={() => setLeadSelecionado(null)}
           onUpdated={(atualizado) => {

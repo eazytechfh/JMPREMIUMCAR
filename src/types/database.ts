@@ -181,3 +181,13 @@ export interface Etiqueta {
   cor: string;
   created_at: string;
 }
+
+export interface PipelineEtapa {
+  id: number;
+  slug: string;
+  nome: string;
+  cor: string;
+  ordem: number;
+  created_at: string;
+  updated_at: string;
+}

@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import type { Cargo, Etiqueta, Profile, Vendedor } from '@/types/database';
+import type { Cargo, Etiqueta, PipelineEtapa, Profile, Vendedor } from '@/types/database';
+import { slugifyStage } from '@/lib/pipeline-stages';
 import { Avatar } from '@/components/Avatar';
 
-type Tab = 'novo-usuario' | 'usuarios' | 'etiquetas' | 'fila' | 'credenciais' | 'aparencia';
+type Tab = 'novo-usuario' | 'usuarios' | 'pipeline' | 'etiquetas' | 'fila' | 'credenciais' | 'aparencia';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'novo-usuario', label: 'Criar novo usuário' },
   { id: 'usuarios', label: 'Gerenciar usuários' },
+  { id: 'pipeline', label: 'Etapas do pipeline' },
   { id: 'etiquetas', label: 'Etiquetas' },
   { id: 'fila', label: 'Fila de atendimento' },
   { id: 'credenciais', label: 'Credenciais' },
@@ -78,6 +80,7 @@ export default function ConfiguracoesPage() {
 
       {tab === 'novo-usuario' && <CriarUsuarioTab />}
       {tab === 'usuarios' && <GerenciarUsuariosTab />}
+      {tab === 'pipeline' && <PipelineEtapasTab podeGerenciar={podeGerenciarUsuarios} />}
       {tab === 'etiquetas' && <EtiquetasTab podeGerenciar={podeGerenciarUsuarios} />}
       {tab === 'fila' && <FilaAtendimentoTab podeGerenciar={podeGerenciarUsuarios} />}
       {tab === 'credenciais' && isAdminMaster && <CredenciaisTab />}
@@ -374,6 +377,102 @@ function GerenciarUsuariosTab() {
             </button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function PipelineEtapasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
+  const [etapas, setEtapas] = useState<PipelineEtapa[]>([]);
+  const [nome, setNome] = useState('');
+  const [cor, setCor] = useState('#3b82f6');
+  const [loading, setLoading] = useState(true);
+  const [salvando, setSalvando] = useState(false);
+  const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
+
+  async function carregar() {
+    setLoading(true);
+    const { data, error } = await createClient().from('pipeline_etapas')
+      .select('id, slug, nome, cor, ordem, created_at, updated_at').order('ordem');
+    if (error) setMensagem({ tipo: 'erro', texto: 'Aplique a migration 0017 para habilitar as etapas configuráveis.' });
+    else setEtapas((data as PipelineEtapa[]) ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => { carregar(); }, []);
+
+  async function adicionar(event: React.FormEvent) {
+    event.preventDefault();
+    const nomeLimpo = nome.trim();
+    const slug = slugifyStage(nomeLimpo);
+    if (!podeGerenciar || !slug || salvando) return;
+    setSalvando(true);
+    setMensagem(null);
+    const { data, error } = await createClient().from('pipeline_etapas')
+      .insert({ nome: nomeLimpo, slug, cor, ordem: etapas.length ? Math.max(...etapas.map((e) => e.ordem)) + 1 : 0 })
+      .select('id, slug, nome, cor, ordem, created_at, updated_at').single();
+    setSalvando(false);
+    if (error) {
+      setMensagem({ tipo: 'erro', texto: error.code === '23505' ? 'Já existe uma etapa com esse nome.' : `Erro ao criar etapa: ${error.message}` });
+      return;
+    }
+    setEtapas((prev) => [...prev, data as PipelineEtapa]);
+    setNome('');
+    setMensagem({ tipo: 'sucesso', texto: 'Etapa criada e conectada ao pipeline.' });
+  }
+
+  async function salvar(etapa: PipelineEtapa) {
+    if (!podeGerenciar) return;
+    const { error } = await createClient().from('pipeline_etapas')
+      .update({ nome: etapa.nome.trim(), cor: etapa.cor }).eq('id', etapa.id);
+    setMensagem(error
+      ? { tipo: 'erro', texto: `Erro ao salvar etapa: ${error.message}` }
+      : { tipo: 'sucesso', texto: 'Etapa atualizada.' });
+  }
+
+  async function mover(index: number, direcao: -1 | 1) {
+    const destino = index + direcao;
+    if (!podeGerenciar || destino < 0 || destino >= etapas.length) return;
+    const atual = etapas[index];
+    const outra = etapas[destino];
+    const supabase = createClient();
+    const [a, b] = await Promise.all([
+      supabase.from('pipeline_etapas').update({ ordem: outra.ordem }).eq('id', atual.id),
+      supabase.from('pipeline_etapas').update({ ordem: atual.ordem }).eq('id', outra.id),
+    ]);
+    if (a.error || b.error) { setMensagem({ tipo: 'erro', texto: 'Não foi possível alterar a ordem.' }); await carregar(); return; }
+    setEtapas((prev) => { const next = [...prev]; [next[index], next[destino]] = [next[destino], next[index]]; return next; });
+  }
+
+  async function remover(etapa: PipelineEtapa) {
+    if (!podeGerenciar || !window.confirm(`Remover a etapa “${etapa.nome}”?`)) return;
+    const { error } = await createClient().from('pipeline_etapas').delete().eq('id', etapa.id);
+    if (error) {
+      setMensagem({ tipo: 'erro', texto: error.code === '23503' ? 'Mova os leads desta etapa antes de removê-la.' : `Erro ao remover: ${error.message}` });
+      return;
+    }
+    setEtapas((prev) => prev.filter((item) => item.id !== etapa.id));
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <p className="text-sm text-gray-500">O nome e a cor aparecem imediatamente no pipeline. O código interno permanece estável para preservar históricos e integrações.</p>
+      {podeGerenciar && (
+        <form onSubmit={adicionar} className="flex items-end gap-2 rounded-xl bg-card p-4 shadow-sm">
+          <div className="flex-1"><label className="mb-1 block text-sm font-medium text-gray-700">Nova etapa</label><input required maxLength={60} value={nome} onChange={(e) => setNome(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" /></div>
+          <input aria-label="Cor da etapa" type="color" value={cor} onChange={(e) => setCor(e.target.value)} className="h-10 w-14 rounded-lg border border-gray-300" />
+          <button disabled={salvando || !nome.trim()} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-60">Adicionar</button>
+        </form>
+      )}
+      {mensagem && <p className={`text-sm ${mensagem.tipo === 'erro' ? 'text-red-600' : 'text-green-600'}`}>{mensagem.texto}</p>}
+      {loading ? <p className="text-sm text-gray-500">Carregando...</p> : (
+        <ul className="space-y-2">{etapas.map((etapa, index) => (
+          <li key={etapa.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-card p-3 shadow-sm">
+            <input type="color" disabled={!podeGerenciar} value={etapa.cor} onChange={(e) => setEtapas((prev) => prev.map((x) => x.id === etapa.id ? { ...x, cor: e.target.value } : x))} className="h-9 w-11" />
+            <input disabled={!podeGerenciar} value={etapa.nome} maxLength={60} onChange={(e) => setEtapas((prev) => prev.map((x) => x.id === etapa.id ? { ...x, nome: e.target.value } : x))} className="min-w-48 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            {podeGerenciar && <><button type="button" disabled={index === 0} onClick={() => mover(index, -1)} className="rounded border px-2 py-1 disabled:opacity-30" aria-label="Mover para esquerda">←</button><button type="button" disabled={index === etapas.length - 1} onClick={() => mover(index, 1)} className="rounded border px-2 py-1 disabled:opacity-30" aria-label="Mover para direita">→</button><button type="button" onClick={() => salvar(etapa)} className="text-xs font-medium text-primary">Salvar</button><button type="button" onClick={() => remover(etapa)} className="text-xs text-red-600">Remover</button></>}
+          </li>
+        ))}</ul>
       )}
     </div>
   );
