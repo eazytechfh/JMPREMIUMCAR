@@ -72,21 +72,21 @@ function NovoLeadModal({ vendedores, idEmpresaPadrao, vendedorPadrao, onClose, o
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  async function buscarProximaOrdemPipeline(estagio: string): Promise<number> {
+  async function buscarPrimeiraOrdemPipeline(estagio: string): Promise<number> {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('BASE_DE_LEADS')
       .select('ordem_pipeline')
       .eq('estagio_lead', estagio)
       .not('ordem_pipeline', 'is', null)
-      .order('ordem_pipeline', { ascending: false })
+      .order('ordem_pipeline', { ascending: true })
       .limit(1)
       .maybeSingle();
 
     if (isOrdemPipelineMissing(error)) return 0;
 
-    const ordemAtual = (data as { ordem_pipeline: number | null } | null)?.ordem_pipeline ?? 0;
-    return ordemAtual + 1;
+    const primeiraOrdem = (data as { ordem_pipeline: number | null } | null)?.ordem_pipeline ?? 1;
+    return primeiraOrdem - 1;
   }
 
   async function criarLead() {
@@ -101,7 +101,7 @@ function NovoLeadModal({ vendedores, idEmpresaPadrao, vendedorPadrao, onClose, o
     const valorNumerico = form.valor ? Number(form.valor.replace(',', '.')) : null;
     const supabase = createClient();
     const estagioInicial = 'oportunidade';
-    const ordemPipeline = await buscarProximaOrdemPipeline(estagioInicial);
+    const ordemPipeline = await buscarPrimeiraOrdemPipeline(estagioInicial);
     const payload = {
       id_empresa: idEmpresaPadrao,
       nome_lead: form.nome_lead.trim(),

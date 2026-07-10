@@ -369,21 +369,21 @@ export default function PipelinePage() {
     setFilters((prev) => ({ ...prev, etiquetaFiltro: String(etiqueta.id) }));
   }
 
-  async function buscarProximaOrdemPipeline(estagio: string): Promise<number> {
+  async function buscarPrimeiraOrdemPipeline(estagio: string): Promise<number> {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('BASE_DE_LEADS')
       .select('ordem_pipeline')
       .eq('estagio_lead', estagio)
       .not('ordem_pipeline', 'is', null)
-      .order('ordem_pipeline', { ascending: false })
+      .order('ordem_pipeline', { ascending: true })
       .limit(1)
       .maybeSingle();
 
     if (isOrdemPipelineMissing(error)) return 0;
 
-    const ordemAtual = (data as { ordem_pipeline: number | null } | null)?.ordem_pipeline ?? 0;
-    return ordemAtual + 1;
+    const primeiraOrdem = (data as { ordem_pipeline: number | null } | null)?.ordem_pipeline ?? 1;
+    return primeiraOrdem - 1;
   }
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -402,7 +402,7 @@ export default function PipelinePage() {
     const estagioAnterior = leadAtual.estagio_lead;
     if (normalizeEstagio(estagioAnterior) === novoEstagio) return;
     const ordemAnterior = leadAtual.ordem_pipeline;
-    const novaOrdem = await buscarProximaOrdemPipeline(novoEstagio);
+    const novaOrdem = await buscarPrimeiraOrdemPipeline(novoEstagio);
 
     // Optimistic update: atualiza a UI imediatamente para dar sensação de resposta instantânea
     // no drag and drop, antes mesmo de confirmar a escrita no banco.
