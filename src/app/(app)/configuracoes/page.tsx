@@ -679,6 +679,22 @@ function FilaAtendimentoTab({ podeGerenciar }: { podeGerenciar: boolean }) {
     fetchFila();
   }, []);
 
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('configuracoes-fila-atendimento')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'VENDEDORES' },
+        () => { void fetchFila(); }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
+
   async function definirDaVez(vendedorId: number) {
     if (!podeGerenciar) {
       setMensagem({ tipo: 'erro', texto: 'Você não tem permissão para alterar a fila.' });
