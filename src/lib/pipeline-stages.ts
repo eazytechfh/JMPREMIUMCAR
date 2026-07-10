@@ -18,6 +18,17 @@ export const DEFAULT_PIPELINE_STAGES: PipelineStage[] = [
   { id: -7, slug: 'pesquisa_atendimento', nome: 'Pesquisa de Atendimento', cor: '#06b6d4', ordem: 6 },
 ];
 
+export const ETAPAS_PROTEGIDAS = new Set([
+  'oportunidade',
+  'em_qualificacao',
+  'em_negociacao',
+  'follow_up',
+]);
+
+export function etapaProtegida(slug: string | null | undefined): boolean {
+  return ETAPAS_PROTEGIDAS.has((slug ?? '').trim().toLowerCase());
+}
+
 export function slugifyStage(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50);

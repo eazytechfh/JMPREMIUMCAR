@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { Cargo, Etiqueta, PipelineEtapa, Profile, Vendedor } from '@/types/database';
-import { slugifyStage } from '@/lib/pipeline-stages';
+import { etapaProtegida, slugifyStage } from '@/lib/pipeline-stages';
 import { Avatar } from '@/components/Avatar';
 
 type Tab = 'novo-usuario' | 'usuarios' | 'pipeline' | 'etiquetas' | 'fila' | 'credenciais' | 'aparencia';
@@ -389,6 +389,7 @@ function PipelineEtapasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [mensagem, setMensagem] = useState<{ tipo: 'erro' | 'sucesso'; texto: string } | null>(null);
+  const etapasEditaveis = useMemo(() => etapas.filter((etapa) => !etapaProtegida(etapa.slug)), [etapas]);
 
   async function carregar() {
     setLoading(true);
@@ -406,6 +407,10 @@ function PipelineEtapasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
     const nomeLimpo = nome.trim();
     const slug = slugifyStage(nomeLimpo);
     if (!podeGerenciar || !slug || salvando) return;
+    if (etapaProtegida(slug)) {
+      setMensagem({ tipo: 'erro', texto: 'Esta etapa é protegida por automações e não pode ser criada novamente.' });
+      return;
+    }
     setSalvando(true);
     setMensagem(null);
     const { data, error } = await createClient().from('pipeline_etapas')
@@ -423,6 +428,10 @@ function PipelineEtapasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
 
   async function salvar(etapa: PipelineEtapa) {
     if (!podeGerenciar) return;
+    if (etapaProtegida(etapa.slug)) {
+      setMensagem({ tipo: 'erro', texto: 'Esta etapa é protegida por automações e não pode ser editada.' });
+      return;
+    }
     const { error } = await createClient().from('pipeline_etapas')
       .update({ nome: etapa.nome.trim(), cor: etapa.cor }).eq('id', etapa.id);
     setMensagem(error
@@ -432,20 +441,33 @@ function PipelineEtapasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
 
   async function mover(index: number, direcao: -1 | 1) {
     const destino = index + direcao;
-    if (!podeGerenciar || destino < 0 || destino >= etapas.length) return;
-    const atual = etapas[index];
-    const outra = etapas[destino];
+    if (!podeGerenciar || destino < 0 || destino >= etapasEditaveis.length) return;
+    const atual = etapasEditaveis[index];
+    const outra = etapasEditaveis[destino];
+    if (etapaProtegida(atual?.slug) || etapaProtegida(outra?.slug)) {
+      setMensagem({ tipo: 'erro', texto: 'Etapas protegidas não podem ser reordenadas.' });
+      return;
+    }
     const supabase = createClient();
     const [a, b] = await Promise.all([
       supabase.from('pipeline_etapas').update({ ordem: outra.ordem }).eq('id', atual.id),
       supabase.from('pipeline_etapas').update({ ordem: atual.ordem }).eq('id', outra.id),
     ]);
     if (a.error || b.error) { setMensagem({ tipo: 'erro', texto: 'Não foi possível alterar a ordem.' }); await carregar(); return; }
-    setEtapas((prev) => { const next = [...prev]; [next[index], next[destino]] = [next[destino], next[index]]; return next; });
+    setEtapas((prev) => prev.map((etapa) => {
+      if (etapa.id === atual.id) return { ...etapa, ordem: outra.ordem };
+      if (etapa.id === outra.id) return { ...etapa, ordem: atual.ordem };
+      return etapa;
+    }).sort((a, b) => a.ordem - b.ordem));
   }
 
   async function remover(etapa: PipelineEtapa) {
-    if (!podeGerenciar || !window.confirm(`Remover a etapa “${etapa.nome}”?`)) return;
+    if (!podeGerenciar) return;
+    if (etapaProtegida(etapa.slug)) {
+      setMensagem({ tipo: 'erro', texto: 'Esta etapa é protegida por automações e não pode ser removida.' });
+      return;
+    }
+    if (!window.confirm(`Remover a etapa “${etapa.nome}”?`)) return;
     const { error } = await createClient().from('pipeline_etapas').delete().eq('id', etapa.id);
     if (error) {
       setMensagem({ tipo: 'erro', texto: error.code === '23503' ? 'Mova os leads desta etapa antes de removê-la.' : `Erro ao remover: ${error.message}` });
@@ -466,11 +488,11 @@ function PipelineEtapasTab({ podeGerenciar }: { podeGerenciar: boolean }) {
       )}
       {mensagem && <p className={`text-sm ${mensagem.tipo === 'erro' ? 'text-red-600' : 'text-green-600'}`}>{mensagem.texto}</p>}
       {loading ? <p className="text-sm text-gray-500">Carregando...</p> : (
-        <ul className="space-y-2">{etapas.map((etapa, index) => (
+        <ul className="space-y-2">{etapasEditaveis.map((etapa, index) => (
           <li key={etapa.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-card p-3 shadow-sm">
             <input type="color" disabled={!podeGerenciar} value={etapa.cor} onChange={(e) => setEtapas((prev) => prev.map((x) => x.id === etapa.id ? { ...x, cor: e.target.value } : x))} className="h-9 w-11" />
             <input disabled={!podeGerenciar} value={etapa.nome} maxLength={60} onChange={(e) => setEtapas((prev) => prev.map((x) => x.id === etapa.id ? { ...x, nome: e.target.value } : x))} className="min-w-48 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            {podeGerenciar && <><button type="button" disabled={index === 0} onClick={() => mover(index, -1)} className="rounded border px-2 py-1 disabled:opacity-30" aria-label="Mover para esquerda">←</button><button type="button" disabled={index === etapas.length - 1} onClick={() => mover(index, 1)} className="rounded border px-2 py-1 disabled:opacity-30" aria-label="Mover para direita">→</button><button type="button" onClick={() => salvar(etapa)} className="text-xs font-medium text-primary">Salvar</button><button type="button" onClick={() => remover(etapa)} className="text-xs text-red-600">Remover</button></>}
+            {podeGerenciar && <><button type="button" disabled={index === 0} onClick={() => mover(index, -1)} className="rounded border px-2 py-1 disabled:opacity-30" aria-label="Mover para esquerda">←</button><button type="button" disabled={index === etapasEditaveis.length - 1} onClick={() => mover(index, 1)} className="rounded border px-2 py-1 disabled:opacity-30" aria-label="Mover para direita">→</button><button type="button" onClick={() => salvar(etapa)} className="text-xs font-medium text-primary">Salvar</button><button type="button" onClick={() => remover(etapa)} className="text-xs text-red-600">Remover</button></>}
           </li>
         ))}</ul>
       )}
