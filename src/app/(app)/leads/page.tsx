@@ -536,6 +536,10 @@ export default function LeadsPage() {
             setLeadSelecionado(atualizado);
             setLeads((prev) => prev.map((l) => (l.id === atualizado.id ? atualizado : l)));
           }}
+          onDeleted={(leadId) => {
+            setLeads((prev) => prev.filter((lead) => lead.id !== leadId));
+            setLeadSelecionado(null);
+          }}
           onEtiquetasChanged={atualizarEtiquetasDoLead}
         />
       )}

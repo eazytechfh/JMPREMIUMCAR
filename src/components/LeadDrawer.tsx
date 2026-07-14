@@ -38,6 +38,7 @@ interface LeadDrawerProps {
   estagioLabelOf: (estagio: string | null | undefined) => string;
   onClose: () => void;
   onUpdated: (lead: BaseDeLeads) => void;
+  onDeleted: (leadId: number) => void;
   onEtiquetasChanged?: (leadId: number, etiquetaIds: number[]) => void;
 }
 
@@ -48,6 +49,7 @@ export function LeadDrawer({
   estagioLabelOf,
   onClose,
   onUpdated,
+  onDeleted,
   onEtiquetasChanged,
 }: LeadDrawerProps) {
   const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
@@ -68,6 +70,9 @@ export function LeadDrawer({
   });
   const [salvandoCampos, setSalvandoCampos] = useState(false);
   const [mensagemCampos, setMensagemCampos] = useState<string | null>(null);
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+  const [erroExclusao, setErroExclusao] = useState<string | null>(null);
 
   useEffect(() => {
     setObservacao(lead.observacao_vendedor ?? '');
@@ -194,6 +199,28 @@ export function LeadDrawer({
       vendedor: vendedorNormalizado,
     });
     setTimeout(() => setMensagemCampos(null), 3000);
+  }
+
+  async function excluirLead() {
+    setExcluindo(true);
+    setErroExclusao(null);
+
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('BASE_DE_LEADS')
+      .delete()
+      .eq('id', lead.id)
+      .select('id');
+
+    if (error || !data?.length) {
+      setExcluindo(false);
+      setErroExclusao(
+        error?.message ?? 'Não foi possível excluir o lead. Verifique se você tem permissão para esta ação.'
+      );
+      return;
+    }
+
+    onDeleted(lead.id);
   }
 
   const idade = calcularIdade(campos.data_nascimento || null);
@@ -462,7 +489,59 @@ export function LeadDrawer({
               </ul>
             )}
           </section>
+          <section className="border-t border-gray-200 pt-5">
+            <h3 className="text-sm font-semibold text-red-700">Excluir lead</h3>
+            <p className="mt-1 text-xs text-gray-500">Esta ação é permanente e não poderá ser desfeita.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setErroExclusao(null);
+                setConfirmandoExclusao(true);
+              }}
+              className="mt-3 rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50"
+            >
+              Excluir lead
+            </button>
+          </section>
         </div>
+
+        {confirmandoExclusao && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="titulo-confirmacao-exclusao"
+          >
+            <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+              <h2 id="titulo-confirmacao-exclusao" className="text-base font-semibold text-gray-900">
+                Confirmar exclusão
+              </h2>
+              <p className="mt-2 text-sm text-gray-600">
+                Tem certeza de que deseja excluir o lead <strong>{lead.nome_lead}</strong>? Esta ação não poderá ser
+                desfeita.
+              </p>
+              {erroExclusao && <p className="mt-3 text-sm text-red-600">{erroExclusao}</p>}
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setConfirmandoExclusao(false)}
+                  disabled={excluindo}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  Não
+                </button>
+                <button
+                  type="button"
+                  onClick={excluirLead}
+                  disabled={excluindo}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                >
+                  {excluindo ? 'Excluindo...' : 'Sim'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
