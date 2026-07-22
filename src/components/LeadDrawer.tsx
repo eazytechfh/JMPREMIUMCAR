@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { BaseDeLeads, Etiqueta, LeadHistoricoEstagio, Vendedor } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
 import { isDentroExpediente } from '@/lib/expediente';
+import { formatLeadAiChangedAt, isLeadAiActive, setLeadAiStatus, type LeadOperationsClient } from '@/lib/leads';
 
 function calcularIdade(dataNascimento: string | null): number | null {
   if (!dataNascimento) return null;
@@ -59,6 +60,9 @@ export function LeadDrawer({
 
   const [observacao, setObservacao] = useState(lead.observacao_vendedor ?? '');
   const [salvandoObservacao, setSalvandoObservacao] = useState(false);
+  const [mensagemObservacao, setMensagemObservacao] = useState<string | null>(null);
+  const [alterandoBot, setAlterandoBot] = useState(false);
+  const [mensagemBot, setMensagemBot] = useState<string | null>(null);
 
   const [campos, setCampos] = useState({
     nome_lead: lead.nome_lead ?? '',
@@ -147,13 +151,23 @@ export function LeadDrawer({
 
   async function salvarObservacao() {
     setSalvandoObservacao(true);
+    setMensagemObservacao(null);
     const supabase = createClient();
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('BASE_DE_LEADS')
       .update({ observacao_vendedor: observacao })
-      .eq('id', lead.id);
+      .eq('id', lead.id)
+      .eq('id_empresa', lead.id_empresa)
+      .select('id, observacao_vendedor')
+      .maybeSingle();
     setSalvandoObservacao(false);
-    if (!error) onUpdated({ ...lead, observacao_vendedor: observacao });
+    const confirmado = data as { id: number; observacao_vendedor: string | null } | null;
+    if (error || confirmado?.id !== lead.id || confirmado.observacao_vendedor !== observacao) {
+      setMensagemObservacao('Não foi possível salvar a observação. Tente novamente.');
+      return;
+    }
+    onUpdated({ ...lead, observacao_vendedor: confirmado.observacao_vendedor });
+    setMensagemObservacao('Observação salva com sucesso');
   }
 
   async function salvarCampos() {
@@ -199,6 +213,24 @@ export function LeadDrawer({
       vendedor: vendedorNormalizado,
     });
     setTimeout(() => setMensagemCampos(null), 3000);
+  }
+
+  async function alternarBot() {
+    if (alterandoBot) return;
+    setAlterandoBot(true);
+    setMensagemBot(null);
+    try {
+      const atualizado = await setLeadAiStatus(createClient() as unknown as LeadOperationsClient, {
+        leadId: lead.id,
+        idEmpresa: lead.id_empresa,
+        ativo: !isLeadAiActive(lead.bot_ativo),
+      });
+      onUpdated({ ...lead, bot_ativo: atualizado.bot_ativo, bot_ativo_alterado_em: atualizado.bot_ativo_alterado_em });
+    } catch {
+      setMensagemBot('Não foi possível alterar o status da IA. Tente novamente.');
+    } finally {
+      setAlterandoBot(false);
+    }
   }
 
   async function excluirLead() {
@@ -441,6 +473,24 @@ export function LeadDrawer({
                 <p className="text-gray-400">Nenhum resumo de qualificação disponível ainda.</p>
               )}
             </div>
+            <div className="mt-3" aria-live="polite">
+              <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${isLeadAiActive(lead.bot_ativo) ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                {isLeadAiActive(lead.bot_ativo) ? 'IA ativa' : 'IA inativa'}
+              </span>
+              <p className="mt-1 text-xs text-gray-500">
+                Última alteração: {formatLeadAiChangedAt(lead.bot_ativo_alterado_em)}
+              </p>
+              <button
+                type="button"
+                onClick={alternarBot}
+                disabled={alterandoBot}
+                aria-pressed={isLeadAiActive(lead.bot_ativo)}
+                className={`mt-2 rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-60 ${isLeadAiActive(lead.bot_ativo) ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:opacity-90'}`}
+              >
+                {alterandoBot ? 'Alterando IA...' : isLeadAiActive(lead.bot_ativo) ? 'Desativar IA' : 'Ativar IA'}
+              </button>
+              {mensagemBot && <p role="status" className="mt-1 text-xs text-red-600">{mensagemBot}</p>}
+            </div>
           </section>
 
           <section>
@@ -462,6 +512,14 @@ export function LeadDrawer({
             >
               {salvandoObservacao ? 'Salvando...' : 'Salvar observação'}
             </button>
+            {mensagemObservacao && (
+              <p
+                role="status"
+                className={`mt-2 text-xs ${mensagemObservacao.includes('sucesso') ? 'text-green-700' : 'text-red-600'}`}
+              >
+                {mensagemObservacao}
+              </p>
+            )}
           </section>
 
           <section>
