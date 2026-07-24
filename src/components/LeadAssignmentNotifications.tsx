@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { LeadNotificacao } from '@/types/database';
@@ -26,6 +26,7 @@ function getMensagemParts(mensagem: string): { nome: string; complemento: string
 export function LeadAssignmentNotifications({ userCargo }: LeadAssignmentNotificationsProps) {
   const [notificacoes, setNotificacoes] = useState<LeadNotificacao[]>([]);
   const [aberto, setAberto] = useState(false);
+  const initialized = useRef(false);
 
   const fetchNotificacoes = useCallback(async () => {
     if (userCargo !== 'vendedor') return;
@@ -39,14 +40,35 @@ export function LeadAssignmentNotifications({ userCargo }: LeadAssignmentNotific
       .limit(50);
 
     setNotificacoes((data as LeadNotificacao[]) ?? []);
+    initialized.current = true;
   }, [userCargo]);
 
   useEffect(() => {
     if (userCargo !== 'vendedor') return;
 
-    fetchNotificacoes();
-    const interval = window.setInterval(fetchNotificacoes, 10000);
-    return () => window.clearInterval(interval);
+    const supabase = createClient();
+    void fetchNotificacoes();
+    const channel = supabase
+      .channel('lead-assignment-notifications')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'lead_notificacoes' },
+        () => {
+          if (initialized.current) {
+            const sound = new Audio('/effects/lead-assigned.mp3');
+            sound.volume = 0.86;
+            void sound.play().catch(() => undefined);
+          }
+          void fetchNotificacoes();
+          window.dispatchEvent(new CustomEvent('lead-assignments-changed'));
+        }
+      )
+      .subscribe();
+    const interval = window.setInterval(fetchNotificacoes, 180_000);
+    return () => {
+      window.clearInterval(interval);
+      void supabase.removeChannel(channel);
+    };
   }, [fetchNotificacoes, userCargo]);
 
   async function marcarComoLida(id: number) {

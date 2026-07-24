@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 import type { BaseDeLeads, Etiqueta, LeadEtiqueta, Vendedor } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
 import { LeadDrawer } from '@/components/LeadDrawer';
+import { AutomotiveLoading } from '@/components/AutomotiveLoading';
 import { ESTAGIO_CONFIG, StatusBadge } from '@/components/StatusBadge';
 import { LeadFilters, createDefaultLeadFilters, filterLeads } from '@/components/LeadFilters';
 
@@ -328,8 +329,11 @@ export default function LeadsPage() {
     }
 
     fetchLeads();
+    const refresh = () => void fetchLeads();
+    window.addEventListener('lead-assignments-changed', refresh);
     return () => {
       isMounted = false;
+      window.removeEventListener('lead-assignments-changed', refresh);
     };
   }, []);
 
@@ -459,7 +463,7 @@ export default function LeadsPage() {
         </div>
 
         {loading ? (
-          <p className="px-4 py-6 text-sm text-gray-500">Carregando...</p>
+          <AutomotiveLoading label="Carregando leads" />
         ) : leadsFiltrados.length === 0 ? (
           <p className="px-4 py-6 text-sm text-gray-500">Nenhum lead encontrado.</p>
         ) : (

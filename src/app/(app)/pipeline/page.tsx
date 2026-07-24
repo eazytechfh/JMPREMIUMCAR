@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   DndContext,
   PointerSensor,
@@ -18,6 +18,8 @@ import { LeadDrawer } from '@/components/LeadDrawer';
 import { LeadFilters, createDefaultLeadFilters, filterLeads } from '@/components/LeadFilters';
 import { ESTAGIO_CONFIG } from '@/components/StatusBadge';
 import { DEFAULT_PIPELINE_STAGES, type PipelineStage } from '@/lib/pipeline-stages';
+import { AutomotiveLoading } from '@/components/AutomotiveLoading';
+import { SaleCelebration } from '@/components/SaleCelebration';
 
 // Fallback usado enquanto a tabela configurável ainda está carregando (ou antes da migration).
 const COLUNAS_PADRAO = (Object.keys(ESTAGIO_CONFIG) as Array<keyof typeof ESTAGIO_CONFIG>).map((id) => ({
@@ -35,6 +37,37 @@ const LEAD_SELECT =
   'id, id_empresa, nome_lead, telefone, email, origem, vendedor, veiculo_interesse, resumo_qualificacao, estagio_lead, ordem_pipeline, resumo_comercial, created_at, updated_at, valor, observacao_vendedor, bot_ativo, "Etapa", "QuemEnviouMsg", "UltimaMensagem", StatusDeFollow:"Status de Follow", "Transferencia", PesquisaDeSatisfacao:"Pesquisa de satisfação", IdContatoClick:"ID CONTATO CLICK", lid, DataEHora:"Data e Hora", cpf, data_nascimento, score_serasa';
 
 type ColunaId = string;
+
+function VendaFechadaModal({
+  lead,
+  onCancel,
+  onConfirm,
+}: {
+  lead: BaseDeLeads;
+  onCancel: () => void;
+  onConfirm: (nome: string, valor: number) => void;
+}) {
+  const [nome, setNome] = useState(lead.nome_lead ?? '');
+  const [valor, setValor] = useState(lead.valor ? String(lead.valor) : '');
+  const valorNumerico = Number(valor.replace(',', '.'));
+  const valido = Boolean(nome.trim()) && Number.isFinite(valorNumerico) && valorNumerico > 0;
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/55 p-4">
+      <div role="dialog" aria-modal="true" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <h2 className="text-lg font-bold text-gray-900">Complete os dados da venda</h2>
+        <p className="mt-1 text-sm text-gray-500">Nome e valor são obrigatórios para fechar o negócio.</p>
+        <label className="mt-5 block text-sm font-medium text-gray-700">Nome do lead</label>
+        <input value={nome} onChange={(event) => setNome(event.target.value)} className="mt-1 w-full rounded-lg border px-3 py-2" />
+        <label className="mt-4 block text-sm font-medium text-gray-700">Valor da venda</label>
+        <input value={valor} onChange={(event) => setValor(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border px-3 py-2" />
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" onClick={onCancel} className="rounded-lg border px-4 py-2 text-sm">Cancelar</button>
+          <button type="button" disabled={!valido} onClick={() => onConfirm(nome.trim(), valorNumerico)} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-40">Confirmar venda</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function normalizeEstagio(estagio: string | null | undefined, colunas = COLUNAS_PADRAO): ColunaId {
   const key = (estagio ?? '').toLowerCase().trim();
@@ -215,6 +248,9 @@ export default function PipelinePage() {
   const [nomeUsuario, setNomeUsuario] = useState<string>('Usuário');
   const [filters, setFilters] = useState(createDefaultLeadFilters);
   const [columnPages, setColumnPages] = useState<Record<string, number>>({});
+  const [vendaPendente, setVendaPendente] = useState<{ lead: BaseDeLeads; novoEstagio: string } | null>(null);
+  const [celebracao, setCelebracao] = useState<string | null>(null);
+  const fecharCelebracao = useCallback(() => setCelebracao(null), []);
 
   useEffect(() => {
     async function fetchUsuario() {
@@ -283,8 +319,11 @@ export default function PipelinePage() {
     }
 
     fetchLeads();
+    const refresh = () => void fetchLeads();
+    window.addEventListener('lead-assignments-changed', refresh);
     return () => {
       isMounted = false;
+      window.removeEventListener('lead-assignments-changed', refresh);
     };
   }, []);
 
@@ -404,6 +443,10 @@ export default function PipelinePage() {
 
     const leadAtual = leads.find((l) => l.id === leadId);
     if (!leadAtual) return;
+    if (novoEstagio === 'fechado' && (!leadAtual.nome_lead?.trim() || !leadAtual.valor || leadAtual.valor <= 0)) {
+      setVendaPendente({ lead: leadAtual, novoEstagio });
+      return;
+    }
 
     const estagioAnterior = leadAtual.estagio_lead;
     if (normalizeEstagio(estagioAnterior, colunas) === novoEstagio) return;
@@ -445,6 +488,31 @@ export default function PipelinePage() {
       estagio_novo: novoEstagio,
       usuario: nomeUsuario,
     });
+    if (novoEstagio === 'fechado') setCelebracao(leadAtual.nome_lead);
+  }
+
+  async function confirmarVenda(nome: string, valor: number) {
+    if (!vendaPendente) return;
+    const { lead, novoEstagio } = vendaPendente;
+    const novaOrdem = await buscarPrimeiraOrdemPipeline(novoEstagio);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('BASE_DE_LEADS')
+      .update({ nome_lead: nome, valor, estagio_lead: novoEstagio, ordem_pipeline: novaOrdem })
+      .eq('id', lead.id)
+      .select(LEAD_SELECT)
+      .single();
+    if (error || !data) {
+      setErrorMessage('Não foi possível fechar a venda. Verifique os dados e tente novamente.');
+      return;
+    }
+    const atualizado = data as unknown as BaseDeLeads;
+    setLeads((prev) => prev.map((item) => item.id === lead.id ? atualizado : item));
+    await supabase.from('lead_historico_estagio').insert({
+      id_lead: lead.id, estagio_anterior: lead.estagio_lead, estagio_novo: novoEstagio, usuario: nomeUsuario,
+    });
+    setVendaPendente(null);
+    setCelebracao(nome);
   }
 
   return (
@@ -471,7 +539,7 @@ export default function PipelinePage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Carregando...</p>
+        <AutomotiveLoading label="Carregando pipeline" />
       ) : (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <div className="min-h-0 flex-1 overflow-x-auto pb-2">
@@ -521,6 +589,10 @@ export default function PipelinePage() {
           onEtiquetasChanged={atualizarEtiquetasDoLead}
         />
       )}
+      {vendaPendente && (
+        <VendaFechadaModal lead={vendaPendente.lead} onCancel={() => setVendaPendente(null)} onConfirm={confirmarVenda} />
+      )}
+      {celebracao && <SaleCelebration leadName={celebracao} onClose={fecharCelebracao} />}
     </div>
   );
 }
